@@ -1,10 +1,10 @@
 [package]
 name = "app"
-version = "0.3.1"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+version = "0.5.0"
+description = "Torabo Studio — an unofficial ZMK Studio fork with live BLE editing for torabo-tsuki (trackball, trackpad, macros, combos, encoder, LED)."
+authors = ["tak-2025"]
+license = "Apache-2.0"
+repository = "https://github.com/tak-2025/Torabo-Studio"
 default-run = "app"
 edition = "2021"
 rust-version = "1.60"
@@ -18,6 +18,7 @@ tauri-build = { version = "2.0.0", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 tauri = { version = "2.0.0", features = [] }
+tauri-plugin-dialog = "2"
 bluest = { version = "0.6.6", features = ["serde"] }
 async-std = "1.12.0"
 uuid = "1.6.1"

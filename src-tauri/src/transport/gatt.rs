@@ -13,6 +13,28 @@ use tauri::{command, AppHandle, State};
 const SVC_UUID: Uuid = Uuid::from_u128(0x00000000_0196_6107_c967_c5cfb1c2482a);
 const RPC_CHRC_UUID: Uuid = Uuid::from_u128(0x00000001_0196_6107_c967_c5cfb1c2482a);
 
+// One attempt at locating the ZMK Studio RPC characteristic. The caller retries
+// this because on Windows the GATT table is frequently not ready the instant the
+// link comes up, surfacing as a transient "discovering services/characteristics"
+// error on the first try.
+async fn discover_studio_characteristic(d: &Device) -> Result<bluest::Characteristic, String> {
+    let services = d
+        .discover_services_with_uuid(SVC_UUID)
+        .await
+        .map_err(|e| format!("discovering services: {}", e.message()))?;
+    let s = services
+        .get(0)
+        .ok_or_else(|| "studio GATT service not present".to_string())?;
+    let chrcs = s
+        .discover_characteristics_with_uuid(RPC_CHRC_UUID)
+        .await
+        .map_err(|e| format!("discovering characteristics: {}", e.message()))?;
+    let c = chrcs
+        .get(0)
+        .ok_or_else(|| "studio GATT characteristic not present".to_string())?;
+    Ok(c.clone())
+}
+
 #[command]
 pub async fn gatt_connect(
     id: String,
@@ -30,30 +52,56 @@ pub async fn gatt_connect(
         adapter.connect_device(&d).await.map_err(|e| format!("Failed to connect to the device: {}", e.message()))?;
     }
 
-    let service = d
-        .discover_services_with_uuid(SVC_UUID)
-        .await
-        .map_err(|e| format!("Failed to find the device services: {}", e.message()))?
-        .get(0)
-        .cloned();
+    // Retain a handle to the connected device so a secondary GATT service (the
+    // trackball config service) can be accessed without disturbing the RPC link.
+    *state.device.lock().await = Some(d.clone());
 
-    if let Some(s) = service {
-        let char = s
-            .discover_characteristics_with_uuid(RPC_CHRC_UUID)
-            .await
-            .map_err(|e| format!("Failed to find the studio service characteristics: {}", e.message()))?
-            .get(0)
-            .cloned();
+    // Retry discovery briefly: the first attempt right after connecting often
+    // fails on Windows because the GATT table isn't ready yet.
+    let c = {
+        let mut attempt = 0u8;
+        loop {
+            attempt += 1;
+            match discover_studio_characteristic(&d).await {
+                Ok(found) => break found,
+                Err(e) => {
+                    if attempt >= 6 {
+                        return Err(format!("Failed to find the studio service: {}", e));
+                    }
+                    eprintln!("[gatt] studio discovery attempt {} failed: {}; retrying", attempt, e);
+                    async_std::task::sleep(Duration::from_millis(350)).await;
+                }
+            }
+        }
+    };
 
-        if let Some(c) = char {
+    {
+        {
             let c2 = c.clone();
             let ah1 = app_handle.clone();
             let notify_handle = tauri::async_runtime::spawn(async move {
-                if let Ok(mut n) = c2.notify().await {
-                    use tauri::Emitter;
+                use tauri::Emitter;
 
-                    while let Some(Ok(vn)) = n.next().await {
-                        ah1.emit("connection_data", vn.clone());
+                match c2.notify().await {
+                    Ok(mut n) => {
+                        while let Some(item) = n.next().await {
+                            match item {
+                                Ok(vn) => {
+                                    let _ = ah1.emit("connection_data", vn.clone());
+                                }
+                                Err(e) => {
+                                    // A notification-stream error usually precedes a
+                                    // link drop; surface it so we can tell apart
+                                    // "device went away" from a write failure.
+                                    eprintln!("[gatt] notify stream error: {:?}", e);
+                                    break;
+                                }
+                            }
+                        }
+                        eprintln!("[gatt] notify stream ended");
+                    }
+                    Err(e) => {
+                        eprintln!("[gatt] failed to subscribe to notifications: {:?}", e);
                     }
                 }
             });
@@ -69,14 +117,14 @@ pub async fn gatt_connect(
                 if let Ok(mut events) = a.device_connection_events(&d).await {
                     while let Some(ev) = events.next().await {
                         if ev == ConnectionEvent::Disconnected {
+                            eprintln!("[gatt] device reported Disconnected event");
                             let state = ah2.state::<super::commands::ActiveConnection>();
                             *state.conn.lock().await = None;
+                            *state.device.lock().await = None;
 
                             if let Err(e) = ah2.emit("connection_disconnected", ()) {
-                                println!("ERROR RAISING! {:?}", e);
+                                eprintln!("[gatt] failed to emit connection_disconnected: {:?}", e);
                             }
-
-                            *state.conn.lock().await = None;
                         }
                     }
                 };
@@ -84,21 +132,35 @@ pub async fn gatt_connect(
 
             let (send, mut recv) = channel(5);
             *state.conn.lock().await = Some(Box::new(send));
+            let ah3 = app_handle.clone();
             tauri::async_runtime::spawn(async move {
+                use tauri::Emitter;
+                use tauri::Manager;
+
                 while let Some(data) = recv.next().await {
-                    c.write(&data).await.expect("Write uneventfully");
+                    // A write failure no longer panics the pump (which used to kill
+                    // the whole connection on the first transient hiccup). Log it and
+                    // tear the connection down cleanly instead.
+                    if let Err(e) = c.write(&data).await {
+                        eprintln!("[gatt] RPC write failed (link likely dropped): {:?}", e);
+                        break;
+                    }
                 }
+
+                // The pump exits on a clean disconnect (channel closed) or a write
+                // error. Either way, make sure the rest of the app sees the
+                // connection as gone rather than silently wedged.
+                let state = ah3.state::<super::commands::ActiveConnection>();
+                *state.conn.lock().await = None;
+                *state.device.lock().await = None;
+                let _ = ah3.emit("connection_disconnected", ());
 
                 disconnect_handle.abort();
                 notify_handle.abort();
             });
 
             Ok(true)
-        } else {
-            Err("Failed to connect: Unable to locate the required studio GATT characteristic".to_string())
         }
-    } else {
-        Err("Failed to connect: Unable to locate the required studio GATT service".to_string())
     }
 }
 

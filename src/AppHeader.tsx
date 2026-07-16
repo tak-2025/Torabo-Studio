@@ -12,9 +12,10 @@ import { useModalRef } from "./misc/useModalRef";
 import { LockStateContext } from "./rpc/LockStateContext";
 import { LockState } from "@zmkfirmware/zmk-studio-ts-client/core";
 import { ConnectionContext } from "./rpc/ConnectionContext";
-import { ChevronDown, Undo2, Redo2, Save, Trash2 } from "lucide-react";
+import { ChevronDown, Undo2, Redo2, Save, Trash2, Languages } from "lucide-react";
 import { Tooltip } from "./misc/Tooltip";
 import { GenericModal } from "./GenericModal";
+import { useI18n, LANGS } from "./i18n";
 
 export interface AppHeaderProps {
   connectedDeviceLabel?: string;
@@ -41,6 +42,7 @@ export const AppHeader = ({
 }: AppHeaderProps) => {
   const [showSettingsReset, setShowSettingsReset] = useState(false);
 
+  const { lang, setLang, t } = useI18n();
   const lockState = useContext(LockStateContext);
   const connectionState = useContext(ConnectionContext);
 
@@ -67,23 +69,20 @@ export const AppHeader = ({
   return (
     <header className="top-0 left-0 right-0 grid grid-cols-[1fr_auto_1fr] items-center justify-between h-10 max-w-full">
       <div className="flex px-3 items-center gap-1">
-        <img src="/zmk.svg" alt="ZMK Logo" className="h-8 rounded" />
-        <p>Studio</p>
+        <img src="/torabo.svg" alt="Torabo Studio Logo" className="h-8 rounded" />
+        <p className="font-semibold">Torabo Studio</p>
       </div>
       <GenericModal ref={showSettingsRef} className="max-w-[50vw]">
-        <h2 className="my-2 text-lg">Restore Stock Settings</h2>
+        <h2 className="my-2 text-lg">{t("header.restoreStock")}</h2>
         <div>
-          <p>
-            Settings reset will remove any customizations previously made in ZMK
-            Studio and restore the stock keymap
-          </p>
-          <p>Continue?</p>
+          <p>{t("header.restoreStockDesc")}</p>
+          <p>{t("common.continue")}</p>
           <div className="flex justify-end my-2 gap-3">
             <Button
               className="rounded bg-base-200 hover:bg-base-300 px-3 py-2"
               onPress={() => setShowSettingsReset(false)}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               className="rounded bg-base-200 hover:bg-base-300 px-3 py-2"
@@ -92,7 +91,7 @@ export const AppHeader = ({
                 onResetSettings?.();
               }}
             >
-              Restore Stock Settings
+              {t("header.restoreStock")}
             </Button>
           </div>
         </div>
@@ -111,57 +110,73 @@ export const AppHeader = ({
               className="px-2 py-1 hover:bg-base-200"
               onAction={onDisconnect}
             >
-              Disconnect
+              {t("header.disconnect")}
             </MenuItem>
             <MenuItem
               className="px-2 py-1 hover:bg-base-200"
               onAction={() => setShowSettingsReset(true)}
             >
-              Restore Stock Settings
+              {t("header.restoreStock")}
             </MenuItem>
           </Menu>
         </Popover>
       </MenuTrigger>
-      <div className="flex justify-end gap-1 px-2">
+      <div className="flex justify-end items-center gap-1 px-2">
+        <Tooltip label={t("lang.label")}>
+          <Button
+            className="flex items-center justify-center gap-1 p-1.5 rounded enabled:hover:bg-base-300"
+            onPress={() =>
+              setLang(
+                LANGS[(LANGS.findIndex((l) => l.id === lang) + 1) % LANGS.length]
+                  .id
+              )
+            }
+          >
+            <Languages className="inline-block w-4" aria-label={t("lang.label")} />
+            <span className="text-xs font-semibold whitespace-nowrap">
+              {LANGS.find((l) => l.id === lang)?.label}
+            </span>
+          </Button>
+        </Tooltip>
         {onUndo && (
-          <Tooltip label="Undo">
+          <Tooltip label={t("tooltip.undo")}>
             <Button
               className="flex items-center justify-center p-1.5 rounded enabled:hover:bg-base-300 disabled:opacity-50"
               isDisabled={!canUndo}
               onPress={onUndo}
             >
-              <Undo2 className="inline-block w-4 mx-1" aria-label="Undo" />
+              <Undo2 className="inline-block w-4 mx-1" aria-label={t("tooltip.undo")} />
             </Button>
           </Tooltip>
         )}
 
         {onRedo && (
-          <Tooltip label="Redo">
+          <Tooltip label={t("tooltip.redo")}>
             <Button
               className="flex items-center justify-center p-1.5 rounded enabled:hover:bg-base-300 disabled:opacity-50"
               isDisabled={!canRedo}
               onPress={onRedo}
             >
-              <Redo2 className="inline-block w-4 mx-1" aria-label="Redo" />
+              <Redo2 className="inline-block w-4 mx-1" aria-label={t("tooltip.redo")} />
             </Button>
           </Tooltip>
         )}
-        <Tooltip label="Save">
+        <Tooltip label={t("tooltip.save")}>
           <Button
             className="flex items-center justify-center p-1.5 rounded enabled:hover:bg-base-300 disabled:opacity-50"
             isDisabled={!unsaved}
             onPress={onSave}
           >
-            <Save className="inline-block w-4 mx-1" aria-label="Save" />
+            <Save className="inline-block w-4 mx-1" aria-label={t("tooltip.save")} />
           </Button>
         </Tooltip>
-        <Tooltip label="Discard">
+        <Tooltip label={t("tooltip.discard")}>
           <Button
             className="flex items-center justify-center p-1.5 rounded enabled:hover:bg-base-300 disabled:opacity-50"
             onPress={onDiscard}
             isDisabled={!unsaved}
           >
-            <Trash2 className="inline-block w-4 mx-1" aria-label="Discard" />
+            <Trash2 className="inline-block w-4 mx-1" aria-label={t("tooltip.discard")} />
           </Button>
         </Tooltip>
       </div>

@@ -11,6 +11,7 @@ import {
 } from "react-aria-components";
 import { PhysicalLayout, type KeyPosition } from "./PhysicalLayout";
 import { useCallback } from "react";
+import { useT } from "../i18n";
 
 export interface PhysicalLayoutItem {
   name: string;
@@ -32,6 +33,7 @@ export const PhysicalLayoutPicker = ({
   selectedPhysicalLayoutIndex,
   onPhysicalLayoutClicked,
 }: PhysicalLayoutPickerProps) => {
+  const t = useT();
   const selectionChanged = useCallback(
     (e: Key) => {
       onPhysicalLayoutClicked?.(layouts.findIndex((l) => l.name === e));
@@ -45,7 +47,7 @@ export const PhysicalLayoutPicker = ({
       className="flex flex-col"
       selectedKey={layouts[selectedPhysicalLayoutIndex].name}
     >
-      <Label className="after:content-[':'] text-sm">Layout</Label>
+      <Label className="after:content-[':'] text-sm">{t("layout.label")}</Label>
       <Button className="ml-2 p-1 rounded min-w-24 text-left hover:bg-base-300">
         <SelectValue<PhysicalLayoutItem>>
           {(v) => {

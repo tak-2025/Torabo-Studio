@@ -31,6 +31,7 @@ import { LockStateContext } from "../rpc/LockStateContext";
 import { LockState } from "@zmkfirmware/zmk-studio-ts-client/core";
 import { deserializeLayoutZoom, LayoutZoom } from "./PhysicalLayout";
 import { useLocalStorageState } from "../misc/useLocalStorageState";
+import { useT } from "../i18n";
 
 type BehaviorMap = Record<number, GetBehaviorDetailsResponse>;
 
@@ -49,11 +50,15 @@ function useBehaviors(): BehaviorMap {
       return;
     }
 
-    async function startRequest() {
-      setBehaviors({});
+    const MAX_ATTEMPTS = 5;
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+    // Fetch the full behavior set once. Returns the map only if every behavior's
+    // details loaded; returns null to signal the caller should retry (e.g. an
+    // RPC was disrupted by concurrent HID traffic).
+    async function fetchOnce(): Promise<BehaviorMap | null> {
       if (!connection.conn) {
-        return;
+        return null;
       }
 
       let get_behaviors: Request = {
@@ -62,30 +67,67 @@ function useBehaviors(): BehaviorMap {
       };
 
       let behavior_list = await call_rpc(connection.conn, get_behaviors);
-      if (!ignore) {
-        let behavior_map: BehaviorMap = {};
-        for (let behaviorId of behavior_list.behaviors?.listAllBehaviors
-          ?.behaviors || []) {
-          if (ignore) {
-            break;
-          }
-          let details_req = {
-            behaviors: { getBehaviorDetails: { behaviorId } },
-            requestId: 0,
-          };
-          let behavior_details = await call_rpc(connection.conn, details_req);
-          let dets: GetBehaviorDetailsResponse | undefined =
-            behavior_details?.behaviors?.getBehaviorDetails;
+      const behaviorIds =
+        behavior_list.behaviors?.listAllBehaviors?.behaviors || [];
+      if (behaviorIds.length === 0) {
+        return null;
+      }
 
-          if (dets) {
-            behavior_map[dets.id] = dets;
-          }
+      let behavior_map: BehaviorMap = {};
+      for (let behaviorId of behaviorIds) {
+        if (ignore || !connection.conn) {
+          return null;
         }
+        let details_req = {
+          behaviors: { getBehaviorDetails: { behaviorId } },
+          requestId: 0,
+        };
+        let behavior_details = await call_rpc(connection.conn, details_req);
+        let dets: GetBehaviorDetailsResponse | undefined =
+          behavior_details?.behaviors?.getBehaviorDetails;
 
-        if (!ignore) {
-          setBehaviors(behavior_map);
+        if (dets) {
+          behavior_map[dets.id] = dets;
+        } else {
+          // A missing detail means the exchange was disrupted; retry the whole
+          // set rather than rendering a half-resolved keymap.
+          console.warn(
+            `[behaviors] no details for behaviorId ${behaviorId} — will retry`,
+            behavior_details
+          );
+          return null;
         }
       }
+
+      console.warn(
+        `[behaviors] loaded ${behaviorIds.length}/${behaviorIds.length} behavior detail(s)`
+      );
+      return behavior_map;
+    }
+
+    async function startRequest() {
+      setBehaviors({});
+
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS && !ignore; attempt++) {
+        console.warn(`[behaviors] fetch attempt ${attempt}/${MAX_ATTEMPTS}`);
+        let map: BehaviorMap | null = null;
+        try {
+          map = await fetchOnce();
+        } catch (e) {
+          console.warn(`[behaviors] attempt ${attempt} threw`, e);
+        }
+        if (ignore) {
+          return;
+        }
+        if (map) {
+          setBehaviors(map);
+          return;
+        }
+        await sleep(400);
+      }
+      console.warn(
+        `[behaviors] gave up after ${MAX_ATTEMPTS} attempts — some keys may show "Unknown"`
+      );
     }
 
     let ignore = false;
@@ -184,6 +226,7 @@ export default function Keyboard() {
   >(undefined);
   const behaviors = useBehaviors();
 
+  const t = useT();
   const conn = useContext(ConnectionContext);
   const undoRedo = useContext(UndoRedoContext);
 
@@ -500,6 +543,16 @@ export default function Keyboard() {
     }
   }, [keymap, selectedLayerIndex]);
 
+  // Pre-connect guidance, same pattern as the other panels (added after Phase E
+  // found this tab rendered a blank panel before a keyboard is connected).
+  if (!conn.conn) {
+    return (
+      <div className="p-4 text-base-content/70">
+        {t("preconnect.keymap")} {t("preconnect.howto")}
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-[auto_1fr] grid-rows-[1fr_minmax(10em,auto)] bg-base-300 max-w-full min-w-0 min-h-0">
       <div className="p-2 flex flex-col gap-2 bg-base-200 row-span-2">
@@ -541,6 +594,7 @@ export default function Keyboard() {
             onKeyPositionClicked={setSelectedKeyPosition}
           />
           <select
+            aria-label={t("scale.auto")}
             className="absolute top-2 right-2 h-8 rounded px-2"
             value={keymapScale}
             onChange={(e) => {
@@ -548,7 +602,7 @@ export default function Keyboard() {
               setKeymapScale(value);
             }}
           >
-            <option value="auto">Auto</option>
+            <option value="auto">{t("scale.auto")}</option>
             <option value={0.25}>25%</option>
             <option value={0.5}>50%</option>
             <option value={0.75}>75%</option>

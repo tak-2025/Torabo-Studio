@@ -42,6 +42,7 @@ import splitkb from "./assets/splitkb.png";
 import splitkbDarkMode from "./assets/splitkb-dark-mode.png";
 import { GenericModal } from "./GenericModal";
 import { ExternalLink } from "./misc/ExternalLink";
+import { useT } from "./i18n";
 
 export interface AboutModalProps {
   open: boolean;
@@ -176,10 +177,12 @@ const sponsors = [
 ];
 
 export const AboutModal = ({ open, onClose }: AboutModalProps) => {
+  const t = useT();
   const ref = useModalRef(open, true);
 
   return (
     <GenericModal ref={ref} className="min-w-min w-[70vw]" onClose={onClose}>
+      <p className="py-1 mr-2 text-sm opacity-80">{t("about.intro")}</p>
       <div className="flex justify-between items-start">
         <p>
           The ZMK Project:{" "}
@@ -193,18 +196,15 @@ export const AboutModal = ({ open, onClose }: AboutModalProps) => {
           </ExternalLink>
         </p>
         <button
+          type="button"
           className="p-1.5 rounded-md bg-gray-100 text-black hover:bg-gray-300"
           onClick={onClose}
         >
-          Close
+          {t("common.close")}
         </button>
       </div>
       <div>
-        <p className="py-1 mr-2">
-          ZMK Studio is made possible thanks to the generous donation of time
-          from our contributors, as well as the financial sponsorship from the
-          following vendors:
-        </p>
+        <p className="py-1 mr-2">{t("about.thanks")}</p>
       </div>
       <div className="grid gap-2 auto-rows-auto grid-cols-[auto_minmax(min-content,1fr)] justify-items-center items-center">
         {sponsors.map((s) => {

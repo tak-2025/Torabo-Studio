@@ -17,8 +17,9 @@ import {
   hid_usage_from_page_and_id,
   hid_usage_page_get_ids,
 } from "../hid-usages";
-import { useCallback, useMemo } from "react";
-import { ChevronDown } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { ChevronDown, Keyboard } from "lucide-react";
+import { VisualKeyPicker } from "./VisualKeyPicker";
 
 export interface HidUsagePage {
   id: number;
@@ -31,6 +32,18 @@ export interface HidUsagePickerProps {
   value?: number;
   usagePages: HidUsagePage[];
   onValueChanged: (value?: number) => void;
+  /**
+   * When true, the large on-screen keyboard (VisualKeyPicker) is hidden by
+   * default and toggled with a small button. The compact dropdown still works
+   * for quick key selection. Used by the macro editor where many step rows
+   * stack vertically and a full keyboard per row is too tall.
+   */
+  collapsibleVisual?: boolean;
+  /**
+   * Placeholder for the type-ahead search input. Purely cosmetic; defaults to
+   * an English hint because the picker's usage names are English.
+   */
+  placeholder?: string;
 }
 
 type UsageSectionProps = HidUsagePage;
@@ -114,7 +127,10 @@ export const HidUsagePicker = ({
   value,
   usagePages,
   onValueChanged,
+  collapsibleVisual,
+  placeholder = "Search key…",
 }: HidUsagePickerProps) => {
+  const [showVisual, setShowVisual] = useState(false);
   const mods = useMemo(() => {
     let flags = value ? value >> 24 : 0;
 
@@ -148,7 +164,8 @@ export const HidUsagePicker = ({
   );
 
   return (
-    <div className="flex gap-2 relative">
+    <div className="flex flex-col">
+      <div className="flex gap-2 relative items-center">
       {label && <Label id="hid-usage-picker">{label}:</Label>}
       <ComboBox
         selectedKey={value ? mask_mods(value) : null}
@@ -156,7 +173,10 @@ export const HidUsagePicker = ({
         aria-labelledby="hid-usage-picker"
       >
         <div className="flex">
-          <Input className="p-1 rounded-l" />
+          <Input
+            className="p-1 rounded-l border border-base-300 bg-base-100 text-base-content"
+            placeholder={placeholder}
+          />
           <Button className="rounded-r bg-primary text-primary-content w-8 h-8 flex justify-center items-center">
             <ChevronDown className="size-4" />
           </Button>
@@ -187,6 +207,21 @@ export const HidUsagePicker = ({
           </Checkbox>
         ))}
       </CheckboxGroup>
+      {collapsibleVisual && (
+        <Button
+          type="button"
+          onPress={() => setShowVisual((v) => !v)}
+          className="rounded bg-base-300 hover:bg-base-100 w-8 h-8 flex justify-center items-center shrink-0"
+          aria-label={showVisual ? "キーボードを隠す" : "キーボードを表示"}
+          aria-pressed={showVisual}
+        >
+          <Keyboard className="size-4" />
+        </Button>
+      )}
+      </div>
+      {(!collapsibleVisual || showVisual) && (
+        <VisualKeyPicker value={value} onValueChanged={onValueChanged} />
+      )}
     </div>
   );
 };

@@ -8,6 +8,7 @@ import { ConnectionContext } from "./rpc/ConnectionContext";
 import { useModalRef } from "./misc/useModalRef";
 import { GenericModal } from "./GenericModal";
 import { ExternalLink } from "./misc/ExternalLink";
+import { useT } from "./i18n";
 
 export type TransportFactory = {
   label: string;
@@ -21,6 +22,7 @@ export type TransportFactory = {
 export interface UnlockModalProps {}
 
 export const UnlockModal = ({}: UnlockModalProps) => {
+  const t = useT();
   let conn = useContext(ConnectionContext);
   let lockState = useContext(LockStateContext);
 
@@ -33,17 +35,14 @@ export const UnlockModal = ({}: UnlockModalProps) => {
 
   return (
     <GenericModal ref={dialog}>
-      <h1 className="text-xl">Unlock To Continue</h1>
+      <h1 className="text-xl">{t("unlock.title")}</h1>
+      <p>{t("unlock.body1")}</p>
       <p>
-        For security reasons, your keyboard requires unlocking before using ZMK
-        Studio.
-      </p>
-      <p>
-        If studio unlocking hasn't been added to your keymap or a combo, see the{" "}
+        {t("unlock.body2Pre")}
         <ExternalLink href="https://zmk.dev/docs/keymaps/behaviors/studio-unlock">
-          Studio Unlock Behavior
-        </ExternalLink>{" "}
-        documentation for more infomation.
+          {t("unlock.body2Link")}
+        </ExternalLink>
+        {t("unlock.body2Post")}
       </p>
     </GenericModal>
   );

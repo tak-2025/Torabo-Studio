@@ -6,14 +6,14 @@
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist/"
   },
-  "productName": "ZMK Studio",
-  "mainBinaryName": "zmk-studio",
-  "version": "0.3.1",
-  "identifier": "dev.zmk.studio",
+  "productName": "Torabo Studio",
+  "mainBinaryName": "torabo-studio",
+  "version": "0.5.0",
+  "identifier": "io.github.tak-2025.torabo-studio",
   "bundle": {
     "active": true,
     "category": "Productivity",
-    "copyright": "",
+    "copyright": "Copyright 2026 tak-2025. Apache-2.0. Includes ZMK Studio, Copyright The ZMK Contributors.",
     "linux": {
       "deb": {
         "depends": []
@@ -27,7 +27,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "longDescription": "",
+    "longDescription": "An unofficial ZMK Studio fork for the torabo-tsuki keyboard. Adds tabs to live-edit trackball, trackpad, macros, combos, encoder and LED settings over BLE without reflashing.",
     "macOS": {
       "entitlements": null,
       "exceptionDomain": "",
@@ -36,15 +36,13 @@
       "signingIdentity": "-"
     },
     "resources": [],
-    "shortDescription": "",
+    "shortDescription": "Live BLE editor for torabo-tsuki (ZMK Studio fork).",
     "targets": "all",
-    "windows": {
-      "signCommand": "signtool.exe sign /v /debug /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib ..\\Microsoft.Trusted.Signing.Client\\bin\\x64\\Azure.CodeSigning.Dlib.dll /dmdf trusted-signing-metadata.json %1"
-    }
+    "windows": {}
   },
   "plugins": {
     "cli": {
-      "description": "Tauri CLI Plugin Example",
+      "description": "Torabo Studio command-line options.",
       "args": [
         {
           "name": "serial-port",
@@ -67,10 +65,10 @@
     "windows": [
       {
         "fullscreen": false,
-        "height": 600,
+        "height": 1200,
         "resizable": true,
-        "title": "ZMK Studio",
-        "width": 800
+        "title": "Torabo Studio",
+        "width": 1200
       }
     ]
   }
