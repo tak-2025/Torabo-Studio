@@ -19,7 +19,7 @@ import {
   connect as tauri_serial_connect,
   list_devices as serial_list_devices,
 } from "./tauri/serial";
-import Keyboard from "./keyboard/Keyboard";
+import MainPanels from "./MainPanels";
 import { UndoRedoContext, useUndoRedo } from "./undoRedo";
 import { usePub, useSub } from "./usePubSub";
 import { LockState } from "@zmkfirmware/zmk-studio-ts-client/core";
@@ -39,12 +39,12 @@ declare global {
 const TRANSPORTS: TransportFactory[] = [
   navigator.serial && { label: "USB", connect: serial_connect },
   ...(navigator.bluetooth && navigator.userAgent.indexOf("Linux") >= 0
-    ? [{ label: "BLE", connect: gatt_connect }]
+    ? [{ label: "Bluetooth", connect: gatt_connect }]
     : []),
   ...(window.__TAURI_INTERNALS__
     ? [
         {
-          label: "BLE",
+          label: "Bluetooth",
           isWireless: true,
           pick_and_connect: {
             connect: tauri_ble_connect,
@@ -307,7 +307,7 @@ function App() {
               onDisconnect={disconnect}
               onResetSettings={resetSettings}
             />
-            <Keyboard />
+            <MainPanels />
             <AppFooter
               onShowAbout={() => setShowAbout(true)}
               onShowLicenseNotice={() => setShowLicenseNotice(true)}

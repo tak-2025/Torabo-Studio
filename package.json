@@ -1,7 +1,14 @@
 {
-  "name": "zmk-studio",
+  "name": "torabo-studio",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.5.0",
+  "description": "An unofficial ZMK Studio fork with live BLE editing for torabo-tsuki (trackball, trackpad, macros, combos, encoder, LED).",
+  "license": "Apache-2.0",
+  "author": "tak-2025",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tak-2025/Torabo-Studio.git"
+  },
   "type": "module",
   "scripts": {
     "generate-data": "node scripts/generate-release-data.js",
@@ -20,6 +27,7 @@
     "@tailwindcss/container-queries": "^0.1.1",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-cli": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
     "@zmkfirmware/zmk-studio-ts-client": "^0.0.18",
     "emittery": "^1.0.3",
     "immer": "^10.1.1",
@@ -48,6 +56,7 @@
     "@typescript-eslint/parser": "^7.2.0",
     "@vitejs/plugin-react-swc": "^3.5.0",
     "autoprefixer": "^10.4.19",
+    "daisyui": "^4.12.24",
     "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.6",

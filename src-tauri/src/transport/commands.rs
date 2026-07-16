@@ -6,6 +6,8 @@ use futures::channel::mpsc::SendError;
 
 use serde::{Deserialize, Serialize};
 
+use bluest::Device;
+
 use tauri::ipc::InvokeBody;
 use tauri::{
     command,
@@ -22,6 +24,10 @@ pub struct AvailableDevice {
 #[derive(Debug, Default)]
 pub struct ActiveConnection<'a> {
     pub conn: Mutex<Option<Box<dyn Sink<Vec<u8>, Error = SendError> + Unpin + Send + 'a>>>,
+    // Kept alive so a second, independent GATT service (e.g. the trackball
+    // config service) can be read/written on the same connected device without
+    // touching the RPC transport above.
+    pub device: Mutex<Option<Device>>,
 }
 
 #[command]
@@ -45,6 +51,7 @@ pub async fn transport_close(
     state: State<'_, ActiveConnection<'_>>,
 ) -> Result<(), ()> {
     *state.conn.lock().await = None;
+    *state.device.lock().await = None;
 
     Ok(())
 }

@@ -1,5 +1,6 @@
 import { BehaviorParameterValueDescription } from "@zmkfirmware/zmk-studio-ts-client/behaviors";
 import { HidUsagePicker } from "./HidUsagePicker";
+import { useT } from "../i18n";
 
 export interface ParameterValuePickerProps {
   value?: number;
@@ -14,6 +15,7 @@ export const ParameterValuePicker = ({
   layers,
   onValueChanged,
 }: ParameterValuePickerProps) => {
+  const t = useT();
   if (values.length == 0) {
     return <></>;
   } else if (values.every((v) => v.constant !== undefined)) {
@@ -76,7 +78,7 @@ export const ParameterValuePicker = ({
     console.log("Not sure how to handle", values);
     return (
       <>
-        <p>Some composite?</p>
+        <p>{t("picker.composite")}</p>
       </>
     );
   }

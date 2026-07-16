@@ -10,6 +10,7 @@ import {
 } from "react-aria-components";
 import { useModalRef } from "../misc/useModalRef";
 import { GenericModal } from "../GenericModal";
+import { useT } from "../i18n";
 
 interface Layer {
   id: number;
@@ -56,6 +57,7 @@ const EditLabelModal = ({
     newName: string | null
   ) => void;
 }) => {
+  const t = useT();
   const ref = useModalRef(open);
   const [newLabelName, setNewLabelName] = useState(editLabelData.name);
 
@@ -70,7 +72,7 @@ const EditLabelModal = ({
       onClose={onClose}
       className="min-w-min w-[30vw] flex flex-col"
     >
-      <span className="mb-3 text-lg">New Layer Name</span>
+      <span className="mb-3 text-lg">{t("layer.newName")}</span>
       <input
         className="p-1 border rounded border-base-content border-solid"
         type="text"
@@ -86,7 +88,7 @@ const EditLabelModal = ({
       />
       <div className="mt-4 flex justify-end">
         <button className="py-1.5 px-2" type="button" onClick={onClose}>
-          Cancel
+          {t("common.cancel")}
         </button>
         <button
           className="py-1.5 px-2 ml-4 rounded-md bg-gray-100 text-black hover:bg-gray-300"
@@ -95,7 +97,7 @@ const EditLabelModal = ({
             handleSave();
           }}
         >
-          Save
+          {t("common.save")}
         </button>
       </div>
     </GenericModal>
@@ -114,6 +116,7 @@ export const LayerPicker = ({
   onLayerNameChanged,
   ...props
 }: LayerPickerProps) => {
+  const t = useT();
   const [editLabelData, setEditLabelData] = useState<EditLabelData | null>(
     null
   );
@@ -168,7 +171,9 @@ export const LayerPicker = ({
   return (
     <div className="flex flex-col min-w-40">
       <div className="grid grid-cols-[1fr_auto_auto] items-center">
-        <Label className="after:content-[':'] text-sm">Layers</Label>
+        <Label className="after:content-[':'] text-sm">
+          {t("layer.layers")}
+        </Label>
         {onRemoveClicked && (
           <button
             type="button"

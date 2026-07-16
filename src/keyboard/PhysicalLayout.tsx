@@ -31,6 +31,9 @@ export function deserializeLayoutZoom(value: string): LayoutZoom {
 interface PhysicalLayoutProps {
   positions: Array<KeyPosition>;
   selectedPosition?: number;
+  /** Optional multi-select predicate; when given it overrides selectedPosition
+   *  for highlighting (used by the combo editor to mark several keys). */
+  isPositionSelected?: (position: number) => boolean;
   oneU?: number;
   hoverZoom?: boolean;
   zoom?: LayoutZoom;
@@ -74,6 +77,7 @@ function scalePosition(
 export const PhysicalLayout = ({
   positions,
   selectedPosition,
+  isPositionSelected,
   oneU = 48,
   onPositionClicked,
   ...props
@@ -132,7 +136,9 @@ export const PhysicalLayout = ({
       >
         <Key
           oneU={oneU}
-          selected={idx === selectedPosition}
+          selected={
+            isPositionSelected ? isPositionSelected(idx) : idx === selectedPosition
+          }
           {...p}
         />
       </div>
