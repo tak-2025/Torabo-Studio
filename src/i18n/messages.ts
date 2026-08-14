@@ -74,8 +74,11 @@ const ja: Dict = {
     "キーマップのみ。トラックボール等の設定は Bluetooth 接続が必要です。",
   "connect.note.webBluetooth":
     "全機能。一度選べば、次回からは選択なしで前回のキーボードにつながります。",
+  "connect.note.webBluetoothAll":
+    "上の一覧にキーボードが出ないとき用。周囲の機器を全部表示します。",
   "connect.note.webBluetoothChoose":
-    "全機能。接続中のキーボードは一覧に出ないため、下の手順が必要です。",
+    "全機能。キーボードだけを一覧に出します。接続中のキーボードは出ないため、" +
+    "下の手順が必要です。",
   "connect.steps.title": "一覧にキーボードが出ないときは（Windows）",
   "connect.steps.open": "Bluetooth の接続ボタンを押して、機器の一覧を開く。",
   "connect.steps.switch":
@@ -213,9 +216,11 @@ const en: Dict = {
     "Keymap only. Trackball and other settings need a Bluetooth connection.",
   "connect.note.webBluetooth":
     "Everything. After the first time, reconnects without asking again.",
+  "connect.note.webBluetoothAll":
+    "For when the keyboard is not in that list: shows every nearby device.",
   "connect.note.webBluetoothChoose":
-    "Everything. A keyboard that is already connected will not be listed, so " +
-    "the steps below are needed.",
+    "Everything. Lists keyboards only. One that is already connected will not " +
+    "be listed, so the steps below are needed.",
   "connect.steps.title": "If the keyboard is not in the list (Windows)",
   "connect.steps.open": "Press the Bluetooth button to open the device list.",
   "connect.steps.switch":

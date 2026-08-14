@@ -54,37 +54,35 @@ const TRANSPORTS: TransportFactory[] = [
   // keyboard's encrypted characteristics have been exercised from Chrome on
   // Windows (see Torabo-Float-Web), so the gate would only remove a path that
   // works. A platform where it genuinely fails reports it at connect time.
-  // Silent reconnect needs getDevices(), which Edge 151 and Chromium do not
-  // have. Without it this entry would behave identically to the one below, so
-  // it only appears where it actually does something different.
-  ...(!isTauri() && canReconnectSilently
+  ...(!isTauri() && navigator.bluetooth
     ? [
         {
           label: "Bluetooth",
           isWireless: true,
-          noteKey: "connect.note.webBluetooth",
-          connect: () => webble_connect(),
-        },
-      ]
-    : []),
-  ...(!isTauri() && navigator.bluetooth
-    ? [
-        {
-          label: canReconnectSilently
-            ? "Bluetooth（すべての機器）"
-            : "Bluetooth",
-          isWireless: true,
-          noteKey: "connect.note.webBluetoothChoose",
-          // A keyboard already connected to this PC is not advertising, so it
-          // cannot be in the list. Getting it there is fiddly enough, and easy
-          // enough to get stuck halfway through, to spell out.
+          // Reconnects silently where the browser can do that; otherwise opens
+          // a chooser listing keyboards rather than every radio in range.
+          noteKey: canReconnectSilently
+            ? "connect.note.webBluetooth"
+            : "connect.note.webBluetoothChoose",
+          // A keyboard already connected to this PC cannot be in the list at
+          // all. Getting it there is fiddly, and easy to get stuck halfway
+          // through, so the procedure is spelled out rather than hinted at.
           stepKeys: [
             "connect.steps.open",
             "connect.steps.switch",
             "connect.steps.switchBack",
             "connect.steps.select",
           ],
-          connect: () => webble_connect({ chooseDevice: true }),
+          connect: () => webble_connect(),
+        },
+        // The filter only matches a keyboard that is discoverable at that
+        // moment, and only on what ZMK happens to broadcast. Neither is
+        // guaranteed, so there is always a way to see everything.
+        {
+          label: "Bluetooth（すべての機器）",
+          isWireless: true,
+          noteKey: "connect.note.webBluetoothAll",
+          connect: () => webble_connect({ allDevices: true }),
         },
       ]
     : []),
