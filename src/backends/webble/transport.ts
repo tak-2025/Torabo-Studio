@@ -1,7 +1,7 @@
 import type { RpcTransport } from "@zmkfirmware/zmk-studio-ts-client/transport/index";
 import { UserCancelledError } from "@zmkfirmware/zmk-studio-ts-client/transport/errors";
 
-import { registerBackend } from "../index";
+import { registerBackend, unregisterBackend } from "../index";
 import type { ToraboBackend } from "../types";
 import { makeConfigBackend } from "./config";
 import { webFiles } from "./files";
@@ -205,27 +205,59 @@ async function attach(
   // It bites on a RECONNECT in particular: a bonded device remembers its CCCD
   // state, so stop+start is two real round trips rather than a local no-op, and
   // the window is wide enough to lose the race.
-  let enqueue!: (bytes: Uint8Array) => void;
-  let close!: () => void;
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
   const readable = new ReadableStream<Uint8Array>({
-    // Called synchronously by the constructor, so both are set below.
-    start(controller) {
-      enqueue = (bytes) => controller.enqueue(bytes);
-      close = () => controller.close();
+    // Called synchronously by the constructor, so `controller` is set below.
+    start(c) {
+      controller = c;
+    },
+    // ts-client pipes this stream with an AbortSignal, so a disconnect cancels
+    // it here — without ever going near gattserverdisconnected. Tearing down
+    // only on the BLE event left this listener alive on a dead stream.
+    cancel() {
+      teardown();
     },
   });
 
-  const onValue = (ev: Event) => {
-    const value = (ev.target as BluetoothRemoteGATTCharacteristic).value;
-    if (value) enqueue(new Uint8Array(value.buffer));
-  };
-  const onDisconnected = () => {
+  /**
+   * Undo everything this connection registered, once.
+   *
+   * Reached three ways — the link dropping, the app aborting, and the stream
+   * being cancelled — and all three happen in practice, sometimes two of them
+   * for the same disconnect. Chrome hands back the same characteristic object
+   * on a reconnect, so a listener that outlives its connection stays attached
+   * for the NEXT one, where it enqueues into a closed stream ("Cannot enqueue a
+   * chunk into a closed readable stream") and interferes with the notification
+   * stream the new connection depends on.
+   */
+  let tornDown = false;
+  const teardown = () => {
+    if (tornDown) return;
+    tornDown = true;
     rpc.removeEventListener("characteristicvaluechanged", onValue);
     device.removeEventListener("gattserverdisconnected", onDisconnected);
-    // The handles this backend holds belong to a link that no longer exists.
-    registerBackend(null);
-    close();
+    // Only if it is still ours: a late teardown must not unregister the backend
+    // belonging to a connection the user has since made.
+    unregisterBackend(backend);
+    try {
+      controller.close();
+    } catch {
+      // Already closed or errored by the pipe that cancelled us.
+    }
   };
+
+  const onValue = (ev: Event) => {
+    if (tornDown) return;
+    const value = (ev.target as BluetoothRemoteGATTCharacteristic).value;
+    if (!value) return;
+    try {
+      controller.enqueue(new Uint8Array(value.buffer));
+    } catch {
+      // The stream went away underneath us; stop acting like it is alive.
+      teardown();
+    }
+  };
+  const onDisconnected = () => teardown();
 
   // Listener first, then subscribe: nothing should be able to arrive unheard.
   rpc.addEventListener("characteristicvaluechanged", onValue);
@@ -261,7 +293,7 @@ async function attach(
   const signal = abortController.signal;
   const onAbort = () => {
     signal.removeEventListener("abort", onAbort);
-    registerBackend(null);
+    teardown();
     device.gatt?.disconnect();
   };
   signal.addEventListener("abort", onAbort);

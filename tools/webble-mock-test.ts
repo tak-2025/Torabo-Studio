@@ -99,8 +99,10 @@ function fakeRpcCharacteristic(log: string[]) {
     },
     notify(bytes: Uint8Array) {
       chr.value = new DataView(bytes.buffer);
-      for (const fn of listeners) fn({ target: chr } as unknown as Event);
+      // Copy: a listener may remove itself while we iterate.
+      for (const fn of [...listeners]) fn({ target: chr } as unknown as Event);
     },
+    listenerCount: () => listeners.size,
   };
   return chr;
 }
@@ -325,8 +327,24 @@ async function run() {
       reader.releaseLock();
 
       transport.abortController.abort("test disconnect");
-      // Let the disconnect event settle before reconnecting.
       await new Promise((r) => setTimeout(r, 0));
+
+      // A notification arriving after teardown must not throw. Chrome reuses
+      // the same characteristic object across reconnects, so a listener left
+      // behind here would fire on the NEXT connection and enqueue into this,
+      // now closed, stream.
+      let threw = "";
+      try {
+        rpcChar.notify(new Uint8Array([9, 9]));
+      } catch (e) {
+        threw = e instanceof Error ? e.message : String(e);
+      }
+      check(`${round}: 切断後の通知で例外を出さない`, threw === "", threw);
+      check(
+        `${round}: 切断でハンドラを外している`,
+        rpcChar.listenerCount() === 0,
+        `listeners=${rpcChar.listenerCount()}`,
+      );
     }
   }
 
