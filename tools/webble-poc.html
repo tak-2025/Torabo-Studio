@@ -38,6 +38,11 @@
     border-left: 3px solid #f59e0b; padding: .5rem .75rem; margin: 1rem 0;
     background: color-mix(in srgb, #f59e0b 12%, transparent); font-size: .9rem;
   }
+  .note.info {
+    border-left-color: #2563eb;
+    background: color-mix(in srgb, #2563eb 10%, transparent);
+  }
+  h2 { font-size: 1rem; }
   table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .9rem; }
   th, td { border: 1px solid currentColor; padding: .35rem .5rem; text-align: left; }
   th { background: color-mix(in srgb, currentColor 10%, transparent); }
@@ -66,6 +71,7 @@
 
 <div class="bar">
   <button id="connect" class="primary">接続して読み取りテスト</button>
+  <button id="reconnect" hidden>許可済みの機器で実行（選択画面なし）</button>
   <button id="write" disabled>書き込みテスト（トラックボール往復）</button>
   <button id="copy" disabled>結果をコピー</button>
   <button id="disconnect" disabled>切断</button>
@@ -83,7 +89,10 @@
   <tbody id="rows"></tbody>
 </table>
 
-<h2 style="font-size:1rem">ログ</h2>
+<h2>この環境で使える経路</h2>
+<div id="caps-report" class="note info">判定中…</div>
+
+<h2>ログ</h2>
 <pre id="log">（未実行）</pre>
 
 <script>
@@ -178,19 +187,25 @@ function addRow(t, readLen, verdict, cls, ms) {
   rows.appendChild(tr);
 }
 
-async function run() {
+async function run(known) {
   btnConnect.disabled = true;
   rows.innerHTML = "";
   chars.clear();
   lines.length = 0;
 
   try {
-    log("requestDevice() — チューザーからキーボードを選んでください");
-    device = await navigator.bluetooth.requestDevice({
-      acceptAllDevices: true,
-      optionalServices: ALL_SERVICES,
-    });
-    log(`選択: ${device.name ?? "(名前なし)"} / id=${device.id}`);
+    if (known) {
+      device = known;
+      log(`許可済みの機器を使用: ${device.name ?? "(名前なし)"} / id=${device.id}`);
+      log("→ 選択画面なし。接続中のキーボードでもこの経路なら届きます。");
+    } else {
+      log("requestDevice() — チューザーからキーボードを選んでください");
+      device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: ALL_SERVICES,
+      });
+      log(`選択: ${device.name ?? "(名前なし)"} / id=${device.id}`);
+    }
 
     device.addEventListener("gattserverdisconnected", () => {
       log("!! GATT 切断されました");
@@ -324,6 +339,65 @@ btnCopy.addEventListener("click", async () => {
     logEl.textContent = text;
   }
 });
+
+// --- この環境で使える経路の判定 ----------------------------------------------
+//
+// Windows では、PC に接続中のキーボードは広告を出さないためチューザーに現れない
+// （ZMK: update_advertising / app/src/ble.c）。Windows 11 の設定に BLE 機器の
+// 「切断」も無い。残る道は getDevices() —— 一度許可した機器に、広告と無関係に
+// 直接つなげる —— だけなので、それが使えるかをここで確定させる。
+
+const btnReconnect = document.getElementById("reconnect");
+const report = document.getElementById("caps-report");
+
+async function reportCapabilities() {
+  if (!navigator.bluetooth) {
+    report.textContent = "Web Bluetooth 自体が使えません。";
+    return;
+  }
+  const hasGetDevices = typeof navigator.bluetooth.getDevices === "function";
+  if (!hasGetDevices) {
+    report.innerHTML =
+      "<strong>getDevices() が使えません。</strong><br />" +
+      "接続中のキーボードにブラウザから届く手段がありません。" +
+      "edge://flags で <code>#enable-web-bluetooth-new-permissions-backend</code> を " +
+      "Enabled にすると使えるようになる可能性があります（要再起動）。";
+    return;
+  }
+
+  let granted = [];
+  try {
+    granted = await navigator.bluetooth.getDevices();
+  } catch (e) {
+    report.textContent = `getDevices() は存在しますが失敗しました: ${e.message ?? e}`;
+    return;
+  }
+
+  if (granted.length === 0) {
+    report.innerHTML =
+      "<strong>getDevices() は使えます</strong>が、このページ (" +
+      location.origin +
+      ") でまだ許可された機器がありません。<br />" +
+      "一度だけ「接続して読み取りテスト」からキーボードを選んでください" +
+      "（キーボードが広告している必要があります: 電源を入れ直す、" +
+      "または PC との接続が切れている状態で）。" +
+      "一度許可すれば、以降は接続中でも選択画面なしでつながります。";
+    return;
+  }
+
+  report.innerHTML =
+    "<strong>getDevices() が使えます。</strong>許可済み: " +
+    granted.map((d) => `${d.name ?? "(名前なし)"}`).join(", ") +
+    "<br />「許可済みの機器で実行」を押すと、選択画面なしで接続します。";
+  btnReconnect.hidden = false;
+  btnReconnect.onclick = async () => {
+    const list = await navigator.bluetooth.getDevices();
+    // 直近に許可したものを優先（アプリ側と同じ選び方）
+    await run(list[list.length - 1]);
+  };
+}
+
+reportCapabilities();
 
 if (!navigator.bluetooth) {
   document.getElementById("unsupported").hidden = false;
