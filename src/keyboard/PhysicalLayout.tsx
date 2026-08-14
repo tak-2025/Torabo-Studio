@@ -19,6 +19,10 @@ export type KeyPosition = PropsWithChildren<{
   ry?: number;
 }>;
 
+/** Breathing room left around the board in "auto", per side, as a fraction of
+ *  the container. Small on purpose: the point of auto is to fill the space. */
+const AUTO_ZOOM_MARGIN = 0.04;
+
 export type LayoutZoom = number | "auto";
 
 export function deserializeLayoutZoom(value: string): LayoutZoom {
@@ -94,10 +98,17 @@ export const PhysicalLayout = ({
 
     const calculateScale = () => {
       if (props.zoom === "auto") {
-        const padding = Math.min(window.innerWidth, window.innerHeight) * 0.05; // Padding when in auto mode
+        // Margin as a fraction of the space available, not an absolute derived
+        // from the window. Upstream takes 5% of the smaller window dimension
+        // and adds it to BOTH sides of BOTH axes of the board — which lands on
+        // a short, wide split keyboard hardest: 44px a side against a 226px-tall
+        // board is a third of its height spent on margin, and the board renders
+        // at ~70% of the room it has. Scaling the margin with the container
+        // keeps the proportion the same whatever the window size.
+        const usable = 1 - 2 * AUTO_ZOOM_MARGIN;
         const newScale = Math.min(
-          parent.clientWidth / (element.clientWidth + 2 * padding),
-          parent.clientHeight / (element.clientHeight + 2 * padding),
+          (parent.clientWidth * usable) / element.clientWidth,
+          (parent.clientHeight * usable) / element.clientHeight,
         );
         setScale(newScale);
       } else {
@@ -137,7 +148,9 @@ export const PhysicalLayout = ({
         <Key
           oneU={oneU}
           selected={
-            isPositionSelected ? isPositionSelected(idx) : idx === selectedPosition
+            isPositionSelected
+              ? isPositionSelected(idx)
+              : idx === selectedPosition
           }
           {...p}
         />
