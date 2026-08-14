@@ -1,7 +1,7 @@
 import { useContext, useMemo } from "react";
 
 import type { RpcTransport } from "@zmkfirmware/zmk-studio-ts-client/transport/index";
-import type { AvailableDevice } from "./tauri/index";
+import type { AvailableDevice } from "./backends";
 import { LockStateContext } from "./rpc/LockStateContext";
 import { LockState } from "@zmkfirmware/zmk-studio-ts-client/core";
 import { ConnectionContext } from "./rpc/ConnectionContext";

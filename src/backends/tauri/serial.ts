@@ -2,14 +2,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import type { RpcTransport } from "@zmkfirmware/zmk-studio-ts-client/transport/index";
-import { AvailableDevice } from ".";
+import { AvailableDevice } from "../types";
 
 export async function list_devices(): Promise<Array<AvailableDevice>> {
-  return await invoke("gatt_list_devices");
+  return await invoke("serial_list_devices");
 }
 
 export async function connect(dev: AvailableDevice): Promise<RpcTransport> {
-  if (!(await invoke("gatt_connect", dev))) {
+  if (!(await invoke("serial_connect", dev))) {
     throw new Error("Failed to connect");
   }
 
@@ -29,7 +29,7 @@ export async function connect(dev: AvailableDevice): Promise<RpcTransport> {
       let writer = response_writable.getWriter();
       await writer.write(new Uint8Array(event.payload));
       writer.releaseLock();
-    }
+    },
   );
 
   const unlisten_disconnected = await listen(
@@ -38,7 +38,7 @@ export async function connect(dev: AvailableDevice): Promise<RpcTransport> {
       unlisten_data();
       unlisten_disconnected();
       response_writable.close();
-    }
+    },
   );
 
   let signal = abortController.signal;

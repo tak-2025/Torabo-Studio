@@ -1,10 +1,8 @@
 import { useCallback, useContext, useState } from "react";
 import { Save, Plus, Trash2, FileCode } from "lucide-react";
-import { open } from "@tauri-apps/plugin-dialog";
 
 import { ConnectionContext } from "../rpc/ConnectionContext";
-import { dmacReadAll, dmacWriteSlot } from "../tauri/dmac";
-import { readKeymapFile } from "../tauri/backup";
+import { dmacReadAll, dmacWriteSlot, openKeymapFile } from "../backends";
 import { HidUsagePicker } from "../behaviors/HidUsagePicker";
 import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
 import { useT } from "../i18n";
@@ -77,22 +75,17 @@ export function MacrosPanel() {
 
   // Import existing macros (M0, M1, ...) from a keymap.keymap into slots.
   const onImport = useCallback(async () => {
-    let path: string | null;
+    let picked: Awaited<ReturnType<typeof openKeymapFile>>;
     try {
-      const res = await open({
-        multiple: false,
-        directory: false,
-        filters: [{ name: "ZMK keymap", extensions: ["keymap", "dtsi", "overlay"] }],
-      });
-      path = typeof res === "string" ? res : null;
+      picked = await openKeymapFile();
     } catch (e) {
       setStatus({ kind: "error", msg: t("status.error") + String(e) });
       return;
     }
-    if (!path) return;
+    if (!picked) return;
 
     try {
-      const macros = importMacrosFromKeymap(await readKeymapFile(path));
+      const macros = importMacrosFromKeymap(picked.text);
       if (macros.length === 0) {
         setStatus({ kind: "error", msg: "macros ノードが見つかりませんでした。" });
         return;

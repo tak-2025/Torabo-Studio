@@ -3,7 +3,7 @@ import { Save, Plus, Trash2 } from "lucide-react";
 
 import { ConnectionContext } from "../rpc/ConnectionContext";
 import { call_rpc } from "../rpc/logging";
-import { comboReadAll, comboWriteSlot } from "../tauri/combo";
+import { comboReadAll, comboWriteSlot } from "../backends";
 import { HidUsagePicker } from "../behaviors/HidUsagePicker";
 import { PhysicalLayout, KeyPosition } from "../keyboard/PhysicalLayout";
 import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";

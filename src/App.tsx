@@ -14,11 +14,12 @@ import { connect as serial_connect } from "@zmkfirmware/zmk-studio-ts-client/tra
 import {
   connect as tauri_ble_connect,
   list_devices as ble_list_devices,
-} from "./tauri/ble";
+} from "./backends/tauri/ble";
 import {
   connect as tauri_serial_connect,
   list_devices as serial_list_devices,
-} from "./tauri/serial";
+} from "./backends/tauri/serial";
+import { isTauri } from "./backends";
 import MainPanels from "./MainPanels";
 import { UndoRedoContext, useUndoRedo } from "./undoRedo";
 import { usePub, useSub } from "./usePubSub";
@@ -30,18 +31,12 @@ import { AppFooter } from "./AppFooter";
 import { AboutModal } from "./AboutModal";
 import { LicenseNoticeModal } from "./misc/LicenseNoticeModal";
 
-declare global {
-  interface Window {
-    __TAURI_INTERNALS__?: object;
-  }
-}
-
 const TRANSPORTS: TransportFactory[] = [
   navigator.serial && { label: "USB", connect: serial_connect },
   ...(navigator.bluetooth && navigator.userAgent.indexOf("Linux") >= 0
     ? [{ label: "Bluetooth", connect: gatt_connect }]
     : []),
-  ...(window.__TAURI_INTERNALS__
+  ...(isTauri()
     ? [
         {
           label: "Bluetooth",
@@ -53,7 +48,7 @@ const TRANSPORTS: TransportFactory[] = [
         },
       ]
     : []),
-  ...(window.__TAURI_INTERNALS__
+  ...(isTauri()
     ? [
         {
           label: "USB",

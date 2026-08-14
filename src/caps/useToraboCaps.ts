@@ -1,7 +1,7 @@
 import { useContext, useEffect, useState } from "react";
 
 import { ConnectionContext } from "../rpc/ConnectionContext";
-import { toraboReadCaps } from "../tauri/caps";
+import { toraboReadCaps } from "../backends";
 import { ToraboCaps, decodeCaps } from "./toraboCaps";
 
 /**

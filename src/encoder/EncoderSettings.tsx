@@ -2,7 +2,7 @@ import { useContext, useEffect, useState } from "react";
 
 import { ConnectionContext } from "../rpc/ConnectionContext";
 import { call_rpc } from "../rpc/logging";
-import { encoderReadConfig, encoderWriteConfig } from "../tauri/encoder";
+import { encoderReadConfig, encoderWriteConfig } from "../backends";
 import { HidUsagePicker } from "../behaviors/HidUsagePicker";
 import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
 import { useT } from "../i18n";
