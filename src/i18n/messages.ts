@@ -75,7 +75,8 @@ const ja: Dict = {
   "connect.note.webBluetooth":
     "全機能。一度選べば、次回からは選択なしで前回のキーボードにつながります。",
   "connect.note.webBluetoothChoose":
-    "初回、またはキーボードを変えるとき。一覧から選びます。",
+    "初回、またはキーボードを変えるとき。※PC と接続中のキーボードは一覧に出ません" +
+    "（その間は広告を止めるため）。Windows の Bluetooth 設定で一度「切断」すると出てきます。削除は不要です。",
   "connect.toUse": "Torabo Studio を使うには、次のいずれかを行ってください:",
   "connect.useBrowser":
     "上記のウェブ技術に対応したブラウザ（Chrome / Edge など）を使う、または",
@@ -205,7 +206,9 @@ const en: Dict = {
   "connect.note.webBluetooth":
     "Everything. After the first time, reconnects without asking again.",
   "connect.note.webBluetoothChoose":
-    "First time, or to switch keyboards: pick from a list.",
+    "First time, or to switch keyboards. Note: a keyboard currently connected " +
+    "to this PC will not be listed (it stops advertising). Disconnect it in the " +
+    "OS Bluetooth settings — no need to remove it — and it appears.",
   "connect.toUse": "To use Torabo Studio, either:",
   "connect.useBrowser":
     "Use a browser that supports the above web technologies, e.g. Chrome/Edge, or",
