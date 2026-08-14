@@ -66,10 +66,14 @@ const ja: Dict = {
     "キーボードを USB または Bluetooth でつなぎます。下から接続方法を選んでください。",
   "connect.selectDevice": "デバイスを選択:",
   "connect.selectType": "接続方法を選択してください。",
-  "connect.unsupportedPre": "お使いのブラウザは対応していません。Torabo Studio は ",
+  "connect.unsupportedPre":
+    "お使いのブラウザは対応していません。Torabo Studio は ",
   "connect.unsupportedMid": " または ",
-  "connect.unsupportedPost":
-    "（Linux のみ）を使って ZMK デバイスに接続します。",
+  "connect.unsupportedPost": "を使って ZMK デバイスに接続します。",
+  "connect.note.webSerial":
+    "キーマップのみ。トラックボール等の設定は Bluetooth 接続が必要です。",
+  "connect.note.webBluetooth":
+    "全機能。事前に OS 側でキーボードとペアリングしておいてください。",
   "connect.toUse": "Torabo Studio を使うには、次のいずれかを行ってください:",
   "connect.useBrowser":
     "上記のウェブ技術に対応したブラウザ（Chrome / Edge など）を使う、または",
@@ -96,7 +100,8 @@ const ja: Dict = {
   "keypicker.title": "クリックでキーを割り当て",
   "keypicker.us": "US配列",
   "keypicker.jis": "JIS配列",
-  "keypicker.hint": "下のキーをクリックすると、選択中のキーに割り当てられます。",
+  "keypicker.hint":
+    "下のキーをクリックすると、選択中のキーに割り当てられます。",
   "keypicker.noteUs":
     "上の「Key」欄に表示される名称はUS配列基準です（例: 2 → 「2 and @」）。",
   "keypicker.noteOs":
@@ -139,8 +144,10 @@ const ja: Dict = {
 
   // Post-connect empty states (before the first Read)
   "empty.read": "まず青い「① 読み込む」を押すと、現在の設定が表示されます。",
-  "empty.macros": "まず青い「読み込む」を押すと、登録済みのマクロが表示されます。",
-  "empty.combos": "まず青い「読み込む」を押すと、登録済みのコンボが表示されます。",
+  "empty.macros":
+    "まず青い「読み込む」を押すと、登録済みのマクロが表示されます。",
+  "empty.combos":
+    "まず青い「読み込む」を押すと、登録済みのコンボが表示されます。",
 };
 
 const en: Dict = {
@@ -190,7 +197,11 @@ const en: Dict = {
   "connect.unsupportedPre":
     "Your browser is not supported. Torabo Studio uses either ",
   "connect.unsupportedMid": " or ",
-  "connect.unsupportedPost": " (Linux only) to connect to ZMK devices.",
+  "connect.unsupportedPost": " to connect to ZMK devices.",
+  "connect.note.webSerial":
+    "Keymap only. Trackball and other settings need a Bluetooth connection.",
+  "connect.note.webBluetooth":
+    "Everything. Pair the keyboard with your OS first.",
   "connect.toUse": "To use Torabo Studio, either:",
   "connect.useBrowser":
     "Use a browser that supports the above web technologies, e.g. Chrome/Edge, or",

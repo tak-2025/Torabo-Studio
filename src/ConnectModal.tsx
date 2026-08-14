@@ -13,6 +13,16 @@ import { useT } from "./i18n";
 export type TransportFactory = {
   label: string;
   isWireless?: boolean;
+  /**
+   * i18n key for a one-line note on what this connection can reach. The torabo
+   * config services live on GATT, so a USB link carries the keymap and nothing
+   * else — better to say so before connecting than to leave someone hunting for
+   * tabs that are not there.
+   *
+   * A key rather than a string because the transport table is built at module
+   * scope, where hooks (and so the translator) are not available.
+   */
+  noteKey?: string;
   connect?: () => Promise<RpcTransport>;
   pick_and_connect?: {
     list: () => Promise<Array<AvailableDevice>>;
@@ -30,7 +40,7 @@ function deviceList(
   open: boolean,
   transports: TransportFactory[],
   onTransportCreated: (t: RpcTransport) => void,
-  tr: (key: string) => string
+  tr: (key: string) => string,
 ) {
   const [devices, setDevices] = useState<
     Array<[TransportFactory, AvailableDevice]>
@@ -50,7 +60,7 @@ function deviceList(
       entries.push(
         ...devices.map<[TransportFactory, AvailableDevice]>((d) => {
           return [t, d];
-        })
+        }),
       );
     }
 
@@ -85,7 +95,7 @@ function deviceList(
           .catch((e) => alert(e));
       }
     },
-    [devices, onTransportCreated]
+    [devices, onTransportCreated],
   );
 
   return (
@@ -132,7 +142,7 @@ function deviceList(
 function simpleDevicePicker(
   transports: TransportFactory[],
   onTransportCreated: (t: RpcTransport) => void,
-  tr: (key: string) => string
+  tr: (key: string) => string,
 ) {
   const [availableDevices, setAvailableDevices] = useState<
     AvailableDevice[] | undefined
@@ -190,7 +200,7 @@ function simpleDevicePicker(
   }, [selectedTransport]);
 
   let connections = transports.map((t) => (
-    <li key={t.label} className="list-none">
+    <li key={t.label} className="list-none flex flex-col gap-1 max-w-44">
       <button
         className="bg-base-300 hover:bg-primary hover:text-primary-content rounded px-2 py-1"
         type="button"
@@ -198,12 +208,17 @@ function simpleDevicePicker(
       >
         {t.label}
       </button>
+      {t.noteKey && (
+        <p className="text-xs text-base-content/60 leading-snug">
+          {tr(t.noteKey)}
+        </p>
+      )}
     </li>
   ));
   return (
     <div>
       <p className="text-sm">{tr("connect.selectType")}</p>
-      <ul className="flex gap-2 pt-2">{connections}</ul>
+      <ul className="flex gap-3 pt-2 items-start">{connections}</ul>
       {selectedTransport && availableDevices && (
         <ul>
           {availableDevices.map((d) => (
@@ -212,7 +227,7 @@ function simpleDevicePicker(
               className="m-1 p-1"
               onClick={async () => {
                 onTransportCreated(
-                  await selectedTransport!.pick_and_connect!.connect(d)
+                  await selectedTransport!.pick_and_connect!.connect(d),
                 );
                 setSelectedTransport(undefined);
               }}
@@ -262,11 +277,11 @@ function connectOptions(
   transports: TransportFactory[],
   onTransportCreated: (t: RpcTransport) => void,
   tr: (key: string) => string,
-  open?: boolean
+  open?: boolean,
 ) {
   const useSimplePicker = useMemo(
     () => transports.every((t) => !t.pick_and_connect),
-    [transports]
+    [transports],
   );
 
   return useSimplePicker
@@ -288,7 +303,9 @@ export const ConnectModal = ({
     <GenericModal ref={dialog} className="max-w-xl">
       <h1 className="text-xl">{t("connect.welcome")}</h1>
       {haveTransports && (
-        <p className="text-sm text-base-content/70 pt-1">{t("connect.intro")}</p>
+        <p className="text-sm text-base-content/70 pt-1">
+          {t("connect.intro")}
+        </p>
       )}
       {haveTransports
         ? connectOptions(transports, onTransportCreated, t, open)
