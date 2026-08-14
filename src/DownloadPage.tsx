@@ -84,14 +84,14 @@ const ReleaseAssets = releaseData.assets.map(
 );
 const ReleaseVersion = releaseData.tag_name;
 
-/** Where the desktop builds come from, and where to send people when there are none. */
-const RELEASES_URL = "https://github.com/tak-2025/Torabo-Studio/releases";
+/** Desktop builds are not distributed; people who want one build it from here. */
+const REPO_URL = "https://github.com/tak-2025/Torabo-Studio";
 
 /**
- * True until a desktop build has actually been published. The generator falls
- * back to an empty asset list when the API has nothing (or cannot be reached),
- * and rendering download buttons with no href behind them is worse than saying
- * plainly that there is no build yet.
+ * Whether there are binaries to offer. There are not, by choice: desktop builds
+ * are not distributed from here — see the note this renders instead. The
+ * machinery stays because it costs nothing and the generator is offline-safe,
+ * but the page must not imply a download is coming.
  */
 const HAS_RELEASE = ReleaseAssets.length > 0;
 
@@ -135,18 +135,24 @@ export const Download = () => {
       />
       <div className="text-3xl mb-1">Torabo Studio</div>
       <div className="text-md mb-1 opacity-70">
-        {HAS_RELEASE ? ReleaseVersion : "デスクトップ版は準備中です"}
+        {HAS_RELEASE
+          ? ReleaseVersion
+          : "デスクトップ版はソースからビルドしてください"}
       </div>
       <div className="bg-base-100 p-8 max-w-md w-full m-2 rounded-lg shadow-lg dark:shadow-xl">
         {!HAS_RELEASE && (
-          <p className="text-sm leading-relaxed">
-            Torabo Studio のデスクトップ版は、まだビルドが公開されていません。
-            公開され次第このページに出ます。
-            <br />
-            それまでは、ブラウザ版（Chrome / Edge）をご利用ください。
-            キーマップ編集は USB、トラックボール等の設定は Bluetooth
-            接続が必要です。
-          </p>
+          <div className="text-sm leading-relaxed flex flex-col gap-3">
+            <p>
+              デスクトップ版のビルド済みバイナリは配布していません。必要な方は
+              リポジトリを fork して、ご自身でビルドしてください（手順は README
+              の「開発・ビルド」）。
+            </p>
+            <p>
+              ビルドせずに使うなら、ブラウザ版（Chrome /
+              Edge）をご利用ください。 キーマップ編集は
+              USB、トラックボール等の設定は Bluetooth 接続が必要です。
+            </p>
+          </div>
         )}
         {HAS_RELEASE && PlatformLinks[platform].length > 0 && (
           <>
@@ -196,8 +202,8 @@ export const Download = () => {
           )}
         </div>
       </div>
-      <a className="text-md hover:underline" href={RELEASES_URL}>
-        See GitHub Releases →
+      <a className="text-md hover:underline" href={REPO_URL}>
+        GitHub リポジトリ →
       </a>
     </div>
   );
