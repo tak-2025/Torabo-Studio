@@ -75,10 +75,16 @@ const ja: Dict = {
   "connect.note.webBluetooth":
     "全機能。一度選べば、次回からは選択なしで前回のキーボードにつながります。",
   "connect.note.webBluetoothChoose":
-    "一覧から選びます。※一覧は広告中の機器しか拾えず、PC と接続中のキーボードは" +
-    "広告を止めるため出てきません。先に一覧を開いてから、プロファイル切替キー" +
-    "（&bt BT_SEL）を押すか電源を入れ直すと現れます。接続時の一度だけで、" +
-    "接続後はそのまま使えます。",
+    "全機能。接続中のキーボードは一覧に出ないため、下の手順が必要です。",
+  "connect.steps.title": "一覧にキーボードが出ないときは（Windows）",
+  "connect.steps.open": "Bluetooth の接続ボタンを押して、機器の一覧を開く。",
+  "connect.steps.switch":
+    "キーボードのプロファイル切替キー（&bt BT_SEL）で別のプロファイルへ切り替える" +
+    "。切断されて広告が始まり、一覧に torabo-tsuki が出ます。",
+  "connect.steps.switchBack":
+    "出てきたら、いつも使っているプロファイルに戻す。" +
+    "戻さないとキーボードで操作できません（一度出た機器は、戻しても選べます）。",
+  "connect.steps.select": "一覧に出たキーボードを選んで接続する。",
   "connect.toUse": "Torabo Studio を使うには、次のいずれかを行ってください:",
   "connect.useBrowser":
     "上記のウェブ技術に対応したブラウザ（Chrome / Edge など）を使う、または",
@@ -208,10 +214,17 @@ const en: Dict = {
   "connect.note.webBluetooth":
     "Everything. After the first time, reconnects without asking again.",
   "connect.note.webBluetoothChoose":
-    "Pick from a list. Note: the list only picks up devices that are " +
-    "advertising, and a keyboard connected to this PC has stopped. Open the " +
-    "list first, then press your profile-switch key (&bt BT_SEL) or " +
-    "power-cycle the keyboard, and it appears. Only needed to connect.",
+    "Everything. A keyboard that is already connected will not be listed, so " +
+    "the steps below are needed.",
+  "connect.steps.title": "If the keyboard is not in the list (Windows)",
+  "connect.steps.open": "Press the Bluetooth button to open the device list.",
+  "connect.steps.switch":
+    "Press your profile-switch key (&bt BT_SEL) to move to another profile. " +
+    "That disconnects it, it starts advertising, and it appears in the list.",
+  "connect.steps.switchBack":
+    "Once it appears, switch back to the profile you normally use — otherwise " +
+    "you cannot type. A device that has been listed stays selectable.",
+  "connect.steps.select": "Pick the keyboard from the list to connect.",
   "connect.toUse": "To use Torabo Studio, either:",
   "connect.useBrowser":
     "Use a browser that supports the above web technologies, e.g. Chrome/Edge, or",

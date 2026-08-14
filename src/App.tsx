@@ -31,6 +31,15 @@ import { AppFooter } from "./AppFooter";
 import { AboutModal } from "./AboutModal";
 import { LicenseNoticeModal } from "./misc/LicenseNoticeModal";
 
+/**
+ * Whether the browser can reconnect to an already-granted keyboard without the
+ * chooser. Edge 151 and Chromium cannot; without it there is no way to reach a
+ * keyboard that is connected to this PC, because it stops advertising and the
+ * chooser only ever lists what is advertising.
+ */
+const canReconnectSilently =
+  typeof navigator.bluetooth?.getDevices === "function";
+
 const TRANSPORTS: TransportFactory[] = [
   navigator.serial && {
     label: "USB",
@@ -45,7 +54,10 @@ const TRANSPORTS: TransportFactory[] = [
   // keyboard's encrypted characteristics have been exercised from Chrome on
   // Windows (see Torabo-Float-Web), so the gate would only remove a path that
   // works. A platform where it genuinely fails reports it at connect time.
-  ...(!isTauri() && navigator.bluetooth
+  // Silent reconnect needs getDevices(), which Edge 151 and Chromium do not
+  // have. Without it this entry would behave identically to the one below, so
+  // it only appears where it actually does something different.
+  ...(!isTauri() && canReconnectSilently
     ? [
         {
           label: "Bluetooth",
@@ -53,13 +65,25 @@ const TRANSPORTS: TransportFactory[] = [
           noteKey: "connect.note.webBluetooth",
           connect: () => webble_connect(),
         },
-        // Once a keyboard has been granted, the plain button reconnects to it
-        // with no chooser at all. This is how you get back to the chooser to
-        // pick a different one.
+      ]
+    : []),
+  ...(!isTauri() && navigator.bluetooth
+    ? [
         {
-          label: "Bluetooth（別の機器を選ぶ）",
+          label: canReconnectSilently
+            ? "Bluetooth（すべての機器）"
+            : "Bluetooth",
           isWireless: true,
           noteKey: "connect.note.webBluetoothChoose",
+          // A keyboard already connected to this PC is not advertising, so it
+          // cannot be in the list. Getting it there is fiddly enough, and easy
+          // enough to get stuck halfway through, to spell out.
+          stepKeys: [
+            "connect.steps.open",
+            "connect.steps.switch",
+            "connect.steps.switchBack",
+            "connect.steps.select",
+          ],
           connect: () => webble_connect({ chooseDevice: true }),
         },
       ]
