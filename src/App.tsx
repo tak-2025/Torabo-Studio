@@ -9,8 +9,8 @@ import { Dispatch, useCallback, useEffect, useState } from "react";
 import { ConnectModal, TransportFactory } from "./ConnectModal";
 
 import type { RpcTransport } from "@zmkfirmware/zmk-studio-ts-client/transport/index";
-import { connect as gatt_connect } from "@zmkfirmware/zmk-studio-ts-client/transport/gatt";
 import { connect as serial_connect } from "@zmkfirmware/zmk-studio-ts-client/transport/serial";
+import { connect as webble_connect } from "./backends/webble/transport";
 import {
   connect as tauri_ble_connect,
   list_devices as ble_list_devices,
@@ -33,8 +33,14 @@ import { LicenseNoticeModal } from "./misc/LicenseNoticeModal";
 
 const TRANSPORTS: TransportFactory[] = [
   navigator.serial && { label: "USB", connect: serial_connect },
-  ...(navigator.bluetooth && navigator.userAgent.indexOf("Linux") >= 0
-    ? [{ label: "Bluetooth", connect: gatt_connect }]
+  // Our own Web Bluetooth transport, not the ts-client one: it keeps the GATT
+  // server so the torabo config services are reachable on the same link. It also
+  // is not gated to Linux — upstream restricts its transport that way, but this
+  // keyboard's encrypted characteristics have been exercised from Chrome on
+  // Windows (see Torabo-Float-Web), so the gate would only remove a path that
+  // works. A platform where it genuinely fails reports it at connect time.
+  ...(!isTauri() && navigator.bluetooth
+    ? [{ label: "Bluetooth", isWireless: true, connect: webble_connect }]
     : []),
   ...(isTauri()
     ? [

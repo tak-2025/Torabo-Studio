@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>webble backend — mock checks</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.7; }
+  .ok { color: #16a34a; }
+  .ng { color: #dc2626; font-weight: 600; }
+  small { opacity: .7; margin-left: 1.5rem; }
+</style>
+</head>
+<body>
+  <h1>Web Bluetooth backend — mock checks</h1>
+  <p>ハードウェア無しで確認できる範囲（読み取り長の検証・discover のキャッシュ・書き込みの非分割）。
+     <code>npm run dev</code> で <code>/tools/webble-mock-test.html</code> を開く。</p>
+  <div id="out">実行中…</div>
+  <script type="module" src="/tools/webble-mock-test.ts"></script>
+</body>
+</html>

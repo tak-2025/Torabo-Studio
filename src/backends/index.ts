@@ -1,6 +1,7 @@
-import type { FileFilter, ToraboBackend } from "./types";
+import type { FileFilter, FilesBackend, ToraboBackend } from "./types";
 import { isTauri } from "./types";
 import { tauriBackend } from "./tauri";
+import { webFiles } from "./webble/files";
 
 export type {
   AvailableDevice,
@@ -80,13 +81,11 @@ export const comboWriteSlot = async (d: Uint8Array) =>
   activeBackend().comboWriteSlot(d);
 
 // --- Files ------------------------------------------------------------------
-// File access does not depend on the keyboard connection, so it resolves against
-// the platform rather than the registered (connection-scoped) backend.
+// Resolved against the platform, not the registered backend: opening a backup to
+// inspect it has nothing to do with whether a keyboard is currently connected.
 
-function fileBackend(): ToraboBackend {
-  if (isTauri()) return tauriBackend;
-  if (registered) return registered;
-  throw new Error("この環境ではファイルの読み書きに対応していません。");
+function fileBackend(): FilesBackend {
+  return isTauri() ? tauriBackend : webFiles;
 }
 
 export const saveTextFile = async (
