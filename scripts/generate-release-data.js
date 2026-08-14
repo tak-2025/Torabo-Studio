@@ -7,7 +7,12 @@ const __dirname = path.resolve(__filename, "../..");
 
 const dataFilePath = path.resolve(__dirname, "src", "data", "release-data.json");
 
-// Offline-safe fallback so DownloadPage.tsx (uses .assets / .tag_name) never breaks.
+// This fork's releases, not upstream's: an upstream build has none of the
+// torabo features, and handing it to someone who came here for them is worse
+// than offering no download at all.
+//
+// Offline-safe fallback so DownloadPage.tsx (uses .assets / .tag_name) never
+// breaks. Also covers "no releases published yet", which 404s.
 const FALLBACK = { tag_name: "unknown", assets: [] };
 
 async function fileExists(p) {
@@ -22,7 +27,7 @@ async function fileExists(p) {
 async function generateReleaseData() {
   try {
     const response = await fetch(
-      "https://api.github.com/repos/zmkfirmware/zmk-studio/releases/latest",
+      "https://api.github.com/repos/tak-2025/Torabo-Studio/releases/latest",
       {
         headers: process.env.GITHUB_TOKEN
           ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` }

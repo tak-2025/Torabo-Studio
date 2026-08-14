@@ -280,7 +280,7 @@ function noTransportsOptionsPrompt(tr: (key: string) => string) {
           <li>{tr("connect.useBrowser")}</li>
           <li>
             {tr("connect.downloadPre")}
-            <ExternalLink href="/download">
+            <ExternalLink href={`${import.meta.env.BASE_URL}download.html`}>
               {tr("connect.downloadLink")}
             </ExternalLink>
             {tr("connect.downloadPost")}
