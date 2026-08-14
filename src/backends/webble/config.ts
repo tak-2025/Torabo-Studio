@@ -54,29 +54,18 @@ export function makeConfigBackend(
     const dv = await chr.readValue();
     const bytes = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
 
-    // A short read is not a harmless partial result here. Some decoders stop at
-    // the end of the buffer rather than failing, so missing slots come back as
-    // empty ones — and the next save would write that emptiness to the keyboard.
-    // Refuse instead, and say which of the two causes it is.
-    const truncated = "TRUNCATED";
-    const problem =
-      // 512 is the largest value ATT can carry. Landing exactly on it means the
-      // read stopped there, not that the config happens to be that size — so
-      // this catches the runtime-sized configs too, which have no known length.
-      bytes.length === 512
-        ? truncated
-        : spec.exactLength !== null && bytes.length !== spec.exactLength
-          ? "MISMATCH"
-          : null;
-
-    if (problem) {
-      const expected =
-        spec.exactLength !== null ? `（${spec.exactLength} バイト必要）` : "";
+    // Macros and combos get a length check because their decoders walk slots
+    // until the buffer ends instead of failing: a short read there looks exactly
+    // like "the remaining slots are empty", and the next save would write that
+    // emptiness to the keyboard. Every other config is checked by its own
+    // decoder against a length derived from its header, so it fails loudly on
+    // its own and does not need a second opinion here.
+    if (spec.exactLength !== null && bytes.length !== spec.exactLength) {
       throw new Error(
-        `${spec.label} の読み取りが ${bytes.length} バイトでした${expected}。` +
-          (problem === truncated
-            ? "ブラウザが 512 バイトで読み取りを打ち切っています。" +
-              "この機能はデスクトップ版をご利用ください。"
+        `${spec.label} の読み取りが ${bytes.length} バイトでした` +
+          `（${spec.exactLength} バイト必要）。` +
+          (bytes.length === 512
+            ? "ブラウザが ATT の上限 512 バイトで読み取りを打ち切った可能性があります。"
             : "ファームウェアとアプリのバージョンが合っていない可能性があります。") +
           "\n（不完全なデータで保存するとキーボード側の設定が失われるため、中断しました）",
       );

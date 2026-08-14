@@ -146,18 +146,22 @@ async function run() {
     check("可変長の設定は長さ検証しない", got.length === 68);
   }
 
-  // 4b. ...but exactly 512 is truncation even there, since ATT cannot carry
-  //     more in one attribute. Trackpad configs can genuinely exceed it.
+  // 4b. Not even at exactly 512. Browsers do read past ATT's 512-byte ceiling —
+  //     measured on the real keyboard: 1624 B of macros and 770 B of trackpad
+  //     came back whole (Edge 151, Windows, 2026-08-14). So a 512-byte config is
+  //     a plausible size, not evidence of truncation, and rejecting it here would
+  //     break a legitimate one. The trackpad decoder still checks the length
+  //     against its own header, which is where a real truncation would surface.
   {
     const tp = CONFIG_SERVICES.trackpad;
     const chars = {
       [tp.characteristic]: { value: new Uint8Array(512), writes: [] },
     };
     const be = makeConfigBackend(mockServer(chars));
-    await expectReject(
-      "可変長でも 512B なら切り詰めと判定する",
-      () => be.trackpadReadConfig(),
-      /打ち切/,
+    const got = await be.trackpadReadConfig();
+    check(
+      "可変長は 512B でも通す（実機で長い読み取りが通ると確認済み）",
+      got.length === 512,
     );
   }
 
