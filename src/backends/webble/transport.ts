@@ -251,7 +251,25 @@ async function attach(
     const value = (ev.target as BluetoothRemoteGATTCharacteristic).value;
     if (!value) return;
     try {
-      controller.enqueue(new Uint8Array(value.buffer));
+      // Window the DataView, then copy. Both matter:
+      //
+      // `new Uint8Array(value.buffer)` — which is what upstream does — ignores
+      // byteOffset/byteLength and hands the whole backing buffer to the framing
+      // decoder, so anything else living in it arrives as if it were payload.
+      //
+      // And the buffer belongs to the browser, which is free to reuse it for
+      // the next notification. This stream is consumed asynchronously, several
+      // transforms downstream, so an uncopied chunk can be overwritten before
+      // it is read. Either one corrupts a frame, and the decoder reports it as
+      // "Unexpected SoF mid-frame" — the end of one frame lost, the start of
+      // the next arriving while it still waited.
+      controller.enqueue(
+        new Uint8Array(
+          value.buffer,
+          value.byteOffset,
+          value.byteLength,
+        ).slice(),
+      );
     } catch {
       // The stream went away underneath us; stop acting like it is alive.
       teardown();

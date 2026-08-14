@@ -81,6 +81,8 @@ function fakeRpcCharacteristic(log: string[]) {
   const listeners = new Set<(ev: Event) => void>();
   const chr = {
     value: undefined as DataView | undefined,
+    /** Stands in for the buffer the browser recycles between notifications. */
+    scratch: new Uint8Array(64),
     addEventListener(_t: string, fn: (ev: Event) => void) {
       log.push("addEventListener");
       listeners.add(fn);
@@ -97,10 +99,19 @@ function fakeRpcCharacteristic(log: string[]) {
     async writeValueWithoutResponse() {
       log.push("write");
     },
+    /**
+     * Deliver like the browser does: a DataView onto a slice of a bigger,
+     * REUSED buffer. Anything that reads `value.buffer` whole, or keeps the
+     * view instead of copying, gets garbage — which is what corrupts frames.
+     */
     notify(bytes: Uint8Array) {
-      chr.value = new DataView(bytes.buffer);
+      chr.scratch.fill(0xee); // leftovers from the previous notification
+      chr.scratch.set(bytes, 8);
+      chr.value = new DataView(chr.scratch.buffer, 8, bytes.length);
       // Copy: a listener may remove itself while we iterate.
       for (const fn of [...listeners]) fn({ target: chr } as unknown as Event);
+      // The browser is free to reuse the buffer the moment dispatch returns.
+      chr.scratch.fill(0xff);
     },
     listenerCount: () => listeners.size,
   };
@@ -323,7 +334,17 @@ async function run() {
       const reader = transport.readable.getReader();
       rpcChar.notify(new Uint8Array([1, 2, 3]));
       const { value } = await reader.read();
-      check(`${round}: 直後の通知を取りこぼさない`, value?.length === 3);
+      check(
+        `${round}: 直後の通知を取りこぼさない`,
+        value?.length === 3,
+        `len=${value?.length}`,
+      );
+      // The payload must survive the buffer being windowed and then recycled.
+      check(
+        `${round}: 使い回しバッファでも中身が壊れない`,
+        !!value && [...value].join(",") === "1,2,3",
+        value ? [...value].join(",") : "(なし)",
+      );
       reader.releaseLock();
 
       transport.abortController.abort("test disconnect");
