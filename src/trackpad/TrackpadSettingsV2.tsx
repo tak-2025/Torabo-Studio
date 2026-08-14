@@ -21,7 +21,7 @@ import { Fragment, useCallback, useContext, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { ConnectionContext } from "../rpc/ConnectionContext";
-import { call_rpc } from "../rpc/logging";
+import { fetchLayerInfo } from "../rpc/keyboardInfo";
 import { trackpadReadConfig, trackpadWriteConfig } from "../backends";
 import { HidUsagePicker } from "../behaviors/HidUsagePicker";
 import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
@@ -192,17 +192,17 @@ function patchAxis(
   dev: number,
   layer: number,
   axis: "x" | "y",
-  patch: Partial<TpAxisCfg>
+  patch: Partial<TpAxisCfg>,
 ): TpConfig {
   const devices = cfg.devices.map((d, di) =>
     di === dev
       ? {
           ...d,
           layers: d.layers.map((l, i) =>
-            i === layer ? { ...l, [axis]: { ...l[axis], ...patch } } : l
+            i === layer ? { ...l, [axis]: { ...l[axis], ...patch } } : l,
           ),
         }
-      : d
+      : d,
   );
   return { ...cfg, devices };
 }
@@ -213,7 +213,7 @@ function patchGesture(
   dev: number,
   layer: number,
   slot: keyof TpGestures,
-  patch: Partial<TpBinding>
+  patch: Partial<TpBinding>,
 ): TpConfig {
   const devices = cfg.devices.map((d, di) =>
     di === dev
@@ -221,11 +221,17 @@ function patchGesture(
           ...d,
           layers: d.layers.map((l, i) =>
             i === layer
-              ? { ...l, gestures: { ...l.gestures, [slot]: { ...l.gestures[slot], ...patch } } }
-              : l
+              ? {
+                  ...l,
+                  gestures: {
+                    ...l.gestures,
+                    [slot]: { ...l.gestures[slot], ...patch },
+                  },
+                }
+              : l,
           ),
         }
-      : d
+      : d,
   );
   return { ...cfg, devices };
 }
@@ -249,16 +255,16 @@ export function TrackpadSettingsV2() {
   const [swipeOpen, setSwipeOpen] = useLocalStorageState<boolean>(
     "torabo.tp.swipeOpen",
     true,
-    BOOL_LS
+    BOOL_LS,
   );
   const [gestureOpen, setGestureOpen] = useLocalStorageState<boolean>(
     "torabo.tp.gestureOpen",
     true,
-    BOOL_LS
+    BOOL_LS,
   );
   // Per-layer fold state for the swipe table (empty = all expanded). UI-only.
   const [collapsedSwipeLayers, setCollapsedSwipeLayers] = useState<Set<number>>(
-    new Set()
+    new Set(),
   );
   const toggleSwipeLayer = (i: number) =>
     setCollapsedSwipeLayers((prev) => {
@@ -268,33 +274,27 @@ export function TrackpadSettingsV2() {
       return next;
     });
 
+  // Cleared on disconnect only. Nothing is fetched until a read is asked for:
+  // see loadLayerInfo below and rpc/keyboardInfo.ts for why.
   useEffect(() => {
     if (!conn) {
       setActiveLayers(null);
       setLayerNames(null);
-      return;
     }
-    let cancelled = false;
-    (async () => {
-      try {
-        const km = (await call_rpc(conn, { keymap: { getKeymap: true } }))?.keymap
-          ?.getKeymap;
-        if (!cancelled && km?.layers) {
-          setActiveLayers(km.layers.length);
-          setLayerNames(km.layers.map((l, i) => l.name || i.toLocaleString()));
-        }
-      } catch (e) {
-        console.warn("trackpad layer count fetch skipped:", e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  }, [conn]);
+
+  const loadLayerInfo = useCallback(async () => {
+    if (!conn) return;
+    const info = await fetchLayerInfo(conn);
+    if (!info) return;
+    setActiveLayers(info.activeLayers);
+    setLayerNames(info.layerNames);
   }, [conn]);
 
   const onRead = useCallback(async () => {
     setStatus({ kind: "busy", msg: t("status.reading") });
     try {
+      await loadLayerInfo();
       const c = decodeTp(await trackpadReadConfig());
       setCfg(c);
       setCustomAxes(new Set()); // fresh read: derive 機能 purely from the data
@@ -303,7 +303,7 @@ export function TrackpadSettingsV2() {
     } catch (e) {
       setStatus({ kind: "error", msg: t("status.error") + String(e) });
     }
-  }, [t]);
+  }, [loadLayerInfo, t]);
 
   const onWrite = useCallback(async () => {
     if (!cfg) return;
@@ -333,16 +333,22 @@ export function TrackpadSettingsV2() {
     : 0;
   const layerCount =
     device && device.layers.length > 0
-      ? Math.max(1, Math.min(rawLayerCount || device.layers.length, device.layers.length))
+      ? Math.max(
+          1,
+          Math.min(rawLayerCount || device.layers.length, device.layers.length),
+        )
       : rawLayerCount;
 
   return (
     <div className="p-4 overflow-auto flex flex-col gap-4 h-full">
       <div className="flex flex-col gap-1">
-        <h2 className="text-fluid-xl font-bold">トラックパッド設定 v2（Bluetooth ライブ編集）</h2>
+        <h2 className="text-fluid-xl font-bold">
+          トラックパッド設定 v2（Bluetooth ライブ編集）
+        </h2>
         <p className="text-sm text-base-content/70">
-          ① <b>読み込む</b>で現在値を取得 → ② 軸の機能・スワイプ動作・タップ/ジェスチャを変更 → ③{" "}
-          <b>書き込む</b>で即反映＆本体に保存
+          ① <b>読み込む</b>で現在値を取得 → ②
+          軸の機能・スワイプ動作・タップ/ジェスチャを変更 → ③ <b>書き込む</b>
+          で即反映＆本体に保存
         </p>
       </div>
       <PanelActionBar
@@ -378,35 +384,54 @@ export function TrackpadSettingsV2() {
               {t("help.termsSummary")}
             </summary>
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 mt-2">
-              <dt className="font-semibold text-base-content whitespace-nowrap">機能</dt>
+              <dt className="font-semibold text-base-content whitespace-nowrap">
+                機能
+              </dt>
               <dd>
-                軸に割り当てる動作を一覧から直接選びます。カーソル移動（Move）/ スクロール（Scroll）/ 無効（Off）のほか、
-                <b>音量・明るさ・ズーム・ブラウザ 進む戻る</b>は上下スワイプのプリセットとしてワンクリックで選べます。
-                <b>カスタム</b>を選ぶと＋方向（上）／−方向（下）に任意の動作を割り当てられます。
+                軸に割り当てる動作を一覧から直接選びます。カーソル移動（Move）/
+                スクロール（Scroll）/ 無効（Off）のほか、
+                <b>音量・明るさ・ズーム・ブラウザ 進む戻る</b>
+                は上下スワイプのプリセットとしてワンクリックで選べます。
+                <b>カスタム</b>
+                を選ぶと＋方向（上）／−方向（下）に任意の動作を割り当てられます。
               </dd>
-              <dt className="font-semibold text-base-content whitespace-nowrap">スワイプ動作</dt>
+              <dt className="font-semibold text-base-content whitespace-nowrap">
+                スワイプ動作
+              </dt>
               <dd>
-                <b>カスタム</b>のとき <b>＋方向（上）</b>と<b>−方向（下）</b>それぞれに 1 つの動作を割当。
+                <b>カスタム</b>のとき <b>＋方向（上）</b>と<b>−方向（下）</b>
+                それぞれに 1 つの動作を割当。
                 音量・明るさ・ズーム・ブラウザは機能の一覧から選ぶだけで自動設定されます。
               </dd>
-              <dt className="font-semibold text-base-content whitespace-nowrap">メディアキー</dt>
+              <dt className="font-semibold text-base-content whitespace-nowrap">
+                メディアキー
+              </dt>
               <dd>
                 メディアキー（再生/停止・音量など）は「カスタム」を選び、動作で「メディアキー（&cp）」を選ぶと一覧から選べます。
               </dd>
-              <dt className="font-semibold text-base-content whitespace-nowrap">動作(behavior)</dt>
+              <dt className="font-semibold text-base-content whitespace-nowrap">
+                動作(behavior)
+              </dt>
               <dd>
-                キー入力（&kp、修飾キー可）/ メディアキー（&cp、音量・輝度など）/ レイヤー操作（&mo・&to・&tog）/ なし（&none）
+                キー入力（&kp、修飾キー可）/
+                メディアキー（&cp、音量・輝度など）/
+                レイヤー操作（&mo・&to・&tog）/ なし（&none）
               </dd>
-              <dt className="font-semibold text-base-content whitespace-nowrap">向き</dt>
+              <dt className="font-semibold text-base-content whitespace-nowrap">
+                向き
+              </dt>
               <dd>reverse にチェックで逆方向（＋/−、上下、進む戻るが反転）</dd>
-              <dt className="font-semibold text-base-content whitespace-nowrap">速さ・感度(step)</dt>
+              <dt className="font-semibold text-base-content whitespace-nowrap">
+                速さ・感度(step)
+              </dt>
               <dd>
                 スクロールやカーソルの速さもここで調整します。1=最も速く敏感、数字が大きいほど遅い（最大32）。
                 Encoder では「1操作あたりの必要移動量」
               </dd>
             </dl>
             <p className="mt-2 text-base-content/70">
-              ミニトラックパッドは実質「縦方向」の操作です。主に <b>Y 軸</b>に機能を割り当ててください。
+              ミニトラックパッドは実質「縦方向」の操作です。主に <b>Y 軸</b>
+              に機能を割り当ててください。
             </p>
           </details>
 
@@ -423,7 +448,9 @@ export function TrackpadSettingsV2() {
               ) : (
                 <ChevronRight className="w-5 h-5 shrink-0" />
               )}
-              <span className="text-base font-bold">なぞる操作（スワイプ）</span>
+              <span className="text-base font-bold">
+                なぞる操作（スワイプ）
+              </span>
             </button>
             {swipeOpen && (
               <p className="text-sm text-base-content/70 pl-6">
@@ -448,8 +475,8 @@ export function TrackpadSettingsV2() {
                   onClick={() =>
                     setCollapsedSwipeLayers(
                       new Set(
-                        device.layers.slice(0, layerCount).map((_, i) => i)
-                      )
+                        device.layers.slice(0, layerCount).map((_, i) => i),
+                      ),
                     )
                   }
                 >
@@ -462,136 +489,168 @@ export function TrackpadSettingsV2() {
               DOM at full size but is clipped → invisible). shrink-0 keeps its height
               and lets the panel's own overflow-auto scroll instead. */}
               <div className="shrink-0 overflow-x-auto max-w-full self-stretch border border-base-300 rounded-md">
-            <table className="table table-zebra w-full [&_th]:text-left [&_td]:text-left [&_th]:px-5 [&_th]:py-3 [&_td]:px-5 [&_td]:py-3 [&_td]:text-sm [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:bg-base-200 [&_thead_th]:z-10 [&_tbody_tr:hover]:bg-base-200/50">
-              <thead>
-                <tr className="bg-base-200">
-                  <th title="レイヤー（layer）">レイヤー</th>
-                  <th>軸</th>
-                  <th>
-                    機能
-                    <br />
-                    <span className="font-normal opacity-60">Role</span>
-                  </th>
-                  <th>
-                    向き
-                    <br />
-                    <span className="font-normal opacity-60">reverse</span>
-                  </th>
-                  <th>
-                    速さ・感度(step)
-                    <br />
-                    <span className="font-normal opacity-60">大きいほど遅い</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {layerCount === 0 && (
-                  <tr>
-                    <td colSpan={5} className="text-base-content/60">
-                      レイヤー情報を取得できませんでした。もう一度「① 読み込む」を押してください。
-                    </td>
-                  </tr>
-                )}
-                {device.layers.slice(0, layerCount).map((l, i) => {
-                  // "custom" must stay selectable even when pos/neg happen to
-                  // equal a preset pair (e.g. switching 音量→カスタム to tweak
-                  // it): matchPreset alone would snap the dropdown back to the
-                  // preset and the detail row could never open. The UI-local
-                  // customAxes override wins over the derived value.
-                  const xKey = `${dev}:${i}:x`;
-                  const yKey = `${dev}:${i}:y`;
-                  const xFunc = customAxes.has(xKey) ? "custom" : funcValueForAxis(l.x);
-                  const yFunc = customAxes.has(yKey) ? "custom" : funcValueForAxis(l.y);
-                  const layerCollapsed = collapsedSwipeLayers.has(i);
-                  // Show the layer name under the index only when a real name
-                  // exists (layerNames falls back to the index string).
-                  const layerName =
-                    layerNames && layerNames[i] !== i.toLocaleString()
-                      ? layerNames[i]
-                      : undefined;
-                  if (layerCollapsed) {
-                    // Single summary row: ▶ toggle + レイヤー番号 + compact X/Y
-                    // functions. colSpan keeps the 5-column table valid.
-                    return (
-                      <tr key={i} className="border-t-2 border-base-300">
-                        <td className="align-middle border-r border-base-200">
-                          <button
-                            type="button"
-                            className="flex items-start gap-1 text-left"
-                            aria-label={`レイヤー ${i} を展開`}
-                            onClick={() => toggleSwipeLayer(i)}
-                          >
-                            <ChevronRight className="w-4 h-4 mt-0.5 shrink-0" />
-                            <span>
-                              <span className="font-bold text-base">{i}</span>
-                              {layerName && (
-                                <span className="block text-xs font-normal text-base-content/60">
-                                  {layerName}
-                                </span>
-                              )}
-                            </span>
-                          </button>
-                        </td>
-                        <td colSpan={4} className="text-sm text-base-content/70">
-                          X: {shortFuncLabel(xFunc, "X")} / Y:{" "}
-                          {shortFuncLabel(yFunc, "Y")}
+                <table className="table table-zebra w-full [&_th]:text-left [&_td]:text-left [&_th]:px-5 [&_th]:py-3 [&_td]:px-5 [&_td]:py-3 [&_td]:text-sm [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:bg-base-200 [&_thead_th]:z-10 [&_tbody_tr:hover]:bg-base-200/50">
+                  <thead>
+                    <tr className="bg-base-200">
+                      <th title="レイヤー（layer）">レイヤー</th>
+                      <th>軸</th>
+                      <th>
+                        機能
+                        <br />
+                        <span className="font-normal opacity-60">Role</span>
+                      </th>
+                      <th>
+                        向き
+                        <br />
+                        <span className="font-normal opacity-60">reverse</span>
+                      </th>
+                      <th>
+                        速さ・感度(step)
+                        <br />
+                        <span className="font-normal opacity-60">
+                          大きいほど遅い
+                        </span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {layerCount === 0 && (
+                      <tr>
+                        <td colSpan={5} className="text-base-content/60">
+                          レイヤー情報を取得できませんでした。もう一度「①
+                          読み込む」を押してください。
                         </td>
                       </tr>
-                    );
-                  }
-                  const xCustom = xFunc === "custom";
-                  const yCustom = yFunc === "custom";
-                  const rows = 2 + (xCustom ? 1 : 0) + (yCustom ? 1 : 0);
-                  const changeFunc = (key: string, axis: "x" | "y", value: string) => {
-                    setCustomAxes((prev) => {
-                      const next = new Set(prev);
-                      if (value === "custom") next.add(key);
-                      else next.delete(key);
-                      return next;
-                    });
-                    setCfg(patchAxis(cfg, dev, i, axis, patchForFuncValue(value)));
-                  };
-                  return (
-                    <Fragment key={i}>
-                      <AxisRow
-                        layerCell={i}
-                        layerName={layerName}
-                        layerRowSpan={rows}
-                        onToggleCollapse={() => toggleSwipeLayer(i)}
-                        axisLabel="X"
-                        axis={l.x}
-                        funcValue={xFunc}
-                        onFuncChange={(v) => changeFunc(xKey, "x", v)}
-                        onChange={(p) => setCfg(patchAxis(cfg, dev, i, "x", p))}
-                      />
-                      {xCustom && (
-                        <EncoderDetailRow
-                          axis={l.x}
-                          layerCount={layerCount}
-                          layerNames={layerNames}
-                          onChange={(p) => setCfg(patchAxis(cfg, dev, i, "x", p))}
-                        />
-                      )}
-                      <AxisRow
-                        axisLabel="Y"
-                        axis={l.y}
-                        funcValue={yFunc}
-                        onFuncChange={(v) => changeFunc(yKey, "y", v)}
-                        onChange={(p) => setCfg(patchAxis(cfg, dev, i, "y", p))}
-                      />
-                      {yCustom && (
-                        <EncoderDetailRow
-                          axis={l.y}
-                          layerCount={layerCount}
-                          layerNames={layerNames}
-                          onChange={(p) => setCfg(patchAxis(cfg, dev, i, "y", p))}
-                        />
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
+                    )}
+                    {device.layers.slice(0, layerCount).map((l, i) => {
+                      // "custom" must stay selectable even when pos/neg happen to
+                      // equal a preset pair (e.g. switching 音量→カスタム to tweak
+                      // it): matchPreset alone would snap the dropdown back to the
+                      // preset and the detail row could never open. The UI-local
+                      // customAxes override wins over the derived value.
+                      const xKey = `${dev}:${i}:x`;
+                      const yKey = `${dev}:${i}:y`;
+                      const xFunc = customAxes.has(xKey)
+                        ? "custom"
+                        : funcValueForAxis(l.x);
+                      const yFunc = customAxes.has(yKey)
+                        ? "custom"
+                        : funcValueForAxis(l.y);
+                      const layerCollapsed = collapsedSwipeLayers.has(i);
+                      // Show the layer name under the index only when a real name
+                      // exists (layerNames falls back to the index string).
+                      const layerName =
+                        layerNames && layerNames[i] !== i.toLocaleString()
+                          ? layerNames[i]
+                          : undefined;
+                      if (layerCollapsed) {
+                        // Single summary row: ▶ toggle + レイヤー番号 + compact X/Y
+                        // functions. colSpan keeps the 5-column table valid.
+                        return (
+                          <tr key={i} className="border-t-2 border-base-300">
+                            <td className="align-middle border-r border-base-200">
+                              <button
+                                type="button"
+                                className="flex items-start gap-1 text-left"
+                                aria-label={`レイヤー ${i} を展開`}
+                                onClick={() => toggleSwipeLayer(i)}
+                              >
+                                <ChevronRight className="w-4 h-4 mt-0.5 shrink-0" />
+                                <span>
+                                  <span className="font-bold text-base">
+                                    {i}
+                                  </span>
+                                  {layerName && (
+                                    <span className="block text-xs font-normal text-base-content/60">
+                                      {layerName}
+                                    </span>
+                                  )}
+                                </span>
+                              </button>
+                            </td>
+                            <td
+                              colSpan={4}
+                              className="text-sm text-base-content/70"
+                            >
+                              X: {shortFuncLabel(xFunc, "X")} / Y:{" "}
+                              {shortFuncLabel(yFunc, "Y")}
+                            </td>
+                          </tr>
+                        );
+                      }
+                      const xCustom = xFunc === "custom";
+                      const yCustom = yFunc === "custom";
+                      const rows = 2 + (xCustom ? 1 : 0) + (yCustom ? 1 : 0);
+                      const changeFunc = (
+                        key: string,
+                        axis: "x" | "y",
+                        value: string,
+                      ) => {
+                        setCustomAxes((prev) => {
+                          const next = new Set(prev);
+                          if (value === "custom") next.add(key);
+                          else next.delete(key);
+                          return next;
+                        });
+                        setCfg(
+                          patchAxis(
+                            cfg,
+                            dev,
+                            i,
+                            axis,
+                            patchForFuncValue(value),
+                          ),
+                        );
+                      };
+                      return (
+                        <Fragment key={i}>
+                          <AxisRow
+                            layerCell={i}
+                            layerName={layerName}
+                            layerRowSpan={rows}
+                            onToggleCollapse={() => toggleSwipeLayer(i)}
+                            axisLabel="X"
+                            axis={l.x}
+                            funcValue={xFunc}
+                            onFuncChange={(v) => changeFunc(xKey, "x", v)}
+                            onChange={(p) =>
+                              setCfg(patchAxis(cfg, dev, i, "x", p))
+                            }
+                          />
+                          {xCustom && (
+                            <EncoderDetailRow
+                              axis={l.x}
+                              layerCount={layerCount}
+                              layerNames={layerNames}
+                              onChange={(p) =>
+                                setCfg(patchAxis(cfg, dev, i, "x", p))
+                              }
+                            />
+                          )}
+                          <AxisRow
+                            axisLabel="Y"
+                            axis={l.y}
+                            funcValue={yFunc}
+                            onFuncChange={(v) => changeFunc(yKey, "y", v)}
+                            onChange={(p) =>
+                              setCfg(patchAxis(cfg, dev, i, "y", p))
+                            }
+                          />
+                          {yCustom && (
+                            <EncoderDetailRow
+                              axis={l.y}
+                              layerCount={layerCount}
+                              layerNames={layerNames}
+                              onChange={(p) =>
+                                setCfg(patchAxis(cfg, dev, i, "y", p))
+                              }
+                            />
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </>
           )}
@@ -624,10 +683,11 @@ export function TrackpadSettingsV2() {
  * axis-specific wording of the scroll option in the 機能 dropdown. UI-only —
  * the option's value is still "scroll" and the patch is unchanged.
  */
-const AXIS_META: Record<"X" | "Y", { rowLabel: string; scrollLabel: string }> = {
-  X: { rowLabel: "横方向（X）", scrollLabel: "横スクロール（Scroll）" },
-  Y: { rowLabel: "縦方向（Y）", scrollLabel: "縦スクロール（Scroll）" },
-};
+const AXIS_META: Record<"X" | "Y", { rowLabel: string; scrollLabel: string }> =
+  {
+    X: { rowLabel: "横方向（X）", scrollLabel: "横スクロール（Scroll）" },
+    Y: { rowLabel: "縦方向（Y）", scrollLabel: "縦スクロール（Scroll）" },
+  };
 
 function AxisRow({
   layerCell,
@@ -710,7 +770,12 @@ function AxisRow({
         </label>
       </td>
       <td>
-        <NumIn min={1} max={32} value={axis.step} onChange={(v) => onChange({ step: v })} />
+        <NumIn
+          min={1}
+          max={32}
+          value={axis.step}
+          onChange={(v) => onChange({ step: v })}
+        />
       </td>
     </tr>
   );
@@ -775,7 +840,11 @@ function GesturesCard({
   /** Section-level fold state (persisted by the parent). */
   open: boolean;
   onToggleOpen: () => void;
-  onChange: (layer: number, slot: keyof TpGestures, patch: Partial<TpBinding>) => void;
+  onChange: (
+    layer: number,
+    slot: keyof TpGestures,
+    patch: Partial<TpBinding>,
+  ) => void;
 }) {
   return (
     <div className="rounded-md border border-base-300 bg-base-200/40 p-4 self-stretch flex flex-col gap-4">
@@ -791,12 +860,15 @@ function GesturesCard({
           ) : (
             <ChevronRight className="w-5 h-5 shrink-0" />
           )}
-          <h3 className="text-base font-bold">たたく操作（タップ / ジェスチャ）</h3>
+          <h3 className="text-base font-bold">
+            たたく操作（タップ / ジェスチャ）
+          </h3>
         </button>
         {open && (
           <p className="text-sm text-base-content/70 pl-6">
             レイヤーごとに、単タップ・ダブルタップ・2本指タップ・長押しへ任意の動作を割当。未設定（&none）なら
-            ドライバ既定（タップ=左クリック / 2本指=右クリック）を素通しします。ダブルタップを設定すると単タップは
+            ドライバ既定（タップ=左クリック /
+            2本指=右クリック）を素通しします。ダブルタップを設定すると単タップは
             判定待ちのため少し遅延します。長押しは指を約0.35秒押したままにすると発火し、指を離すまで保持します
             （&mo でレイヤー保持など）。
             スクロールやカーソル移動は上の「なぞる操作（スワイプ）」で設定します。
@@ -804,56 +876,59 @@ function GesturesCard({
         )}
       </div>
       {open && (
-      <div className="flex flex-col gap-4">
-        {device.layers.slice(0, layerCount).map((l, i) => {
-          const name =
-            layerNames && layerNames[i] !== i.toLocaleString()
-              ? layerNames[i]
-              : undefined;
-          return (
-          <details
-            key={i}
-            open
-            className="rounded-md border border-base-300 bg-base-100 p-3"
-          >
-            <summary className="font-bold text-sm cursor-pointer select-none" title="レイヤー（layer）">
-              レイヤー {i}
-              {name && `（${name}）`}
-            </summary>
-            <div className="grid gap-4 md:grid-cols-1 mt-3">
-              <BindingEditor
-                label="単タップ"
-                binding={l.gestures.tap}
-                layerCount={layerCount}
-                layerNames={layerNames}
-                onChange={(p) => onChange(i, "tap", p)}
-              />
-              <BindingEditor
-                label="ダブルタップ"
-                binding={l.gestures.dtap}
-                layerCount={layerCount}
-                layerNames={layerNames}
-                onChange={(p) => onChange(i, "dtap", p)}
-              />
-              <BindingEditor
-                label="2本指タップ"
-                binding={l.gestures.tap2}
-                layerCount={layerCount}
-                layerNames={layerNames}
-                onChange={(p) => onChange(i, "tap2", p)}
-              />
-              <BindingEditor
-                label="長押し（hold）"
-                binding={l.gestures.hold}
-                layerCount={layerCount}
-                layerNames={layerNames}
-                onChange={(p) => onChange(i, "hold", p)}
-              />
-            </div>
-          </details>
-          );
-        })}
-      </div>
+        <div className="flex flex-col gap-4">
+          {device.layers.slice(0, layerCount).map((l, i) => {
+            const name =
+              layerNames && layerNames[i] !== i.toLocaleString()
+                ? layerNames[i]
+                : undefined;
+            return (
+              <details
+                key={i}
+                open
+                className="rounded-md border border-base-300 bg-base-100 p-3"
+              >
+                <summary
+                  className="font-bold text-sm cursor-pointer select-none"
+                  title="レイヤー（layer）"
+                >
+                  レイヤー {i}
+                  {name && `（${name}）`}
+                </summary>
+                <div className="grid gap-4 md:grid-cols-1 mt-3">
+                  <BindingEditor
+                    label="単タップ"
+                    binding={l.gestures.tap}
+                    layerCount={layerCount}
+                    layerNames={layerNames}
+                    onChange={(p) => onChange(i, "tap", p)}
+                  />
+                  <BindingEditor
+                    label="ダブルタップ"
+                    binding={l.gestures.dtap}
+                    layerCount={layerCount}
+                    layerNames={layerNames}
+                    onChange={(p) => onChange(i, "dtap", p)}
+                  />
+                  <BindingEditor
+                    label="2本指タップ"
+                    binding={l.gestures.tap2}
+                    layerCount={layerCount}
+                    layerNames={layerNames}
+                    onChange={(p) => onChange(i, "tap2", p)}
+                  />
+                  <BindingEditor
+                    label="長押し（hold）"
+                    binding={l.gestures.hold}
+                    layerCount={layerCount}
+                    layerNames={layerNames}
+                    onChange={(p) => onChange(i, "hold", p)}
+                  />
+                </div>
+              </details>
+            );
+          })}
+        </div>
       )}
     </div>
   );
@@ -886,7 +961,9 @@ function BindingEditor({
   };
 
   const isLayer =
-    b.behavior === TpBehavior.Mo || b.behavior === TpBehavior.To || b.behavior === TpBehavior.Tog;
+    b.behavior === TpBehavior.Mo ||
+    b.behavior === TpBehavior.To ||
+    b.behavior === TpBehavior.Tog;
 
   return (
     <div className="flex flex-col gap-2 rounded border border-base-300 bg-base-100/60 p-2">
@@ -906,7 +983,9 @@ function BindingEditor({
         </select>
         {isLayer && (
           <label className="flex items-center gap-2 text-sm">
-            <span className="text-base-content/70" title="レイヤー（layer）">レイヤー</span>
+            <span className="text-base-content/70" title="レイヤー（layer）">
+              レイヤー
+            </span>
             {layerNames ? (
               <select
                 className="select select-bordered select-sm"
@@ -943,13 +1022,14 @@ function BindingEditor({
               onChange(
                 v === undefined
                   ? { param: 0, mods: 0 }
-                  : { param: v & 0xffff, mods: (v >>> 24) & 0xff }
+                  : { param: v & 0xffff, mods: (v >>> 24) & 0xff },
               )
             }
             collapsibleVisual
           />
           <span className="text-xs text-base-content/60">
-            キー名で検索（英語）するか、右端の ⌨ ボタンでキーボード画面から選べます
+            キー名で検索（英語）するか、右端の ⌨
+            ボタンでキーボード画面から選べます
           </span>
         </>
       )}
@@ -1015,7 +1095,11 @@ function CpPicker({
           usagePages={[{ id: PAGE_CONSUMER }]}
           value={param ? usageFromPage(PAGE_CONSUMER, param) : undefined}
           onValueChanged={(v) =>
-            onChange(v === undefined ? { param: 0, mods: 0 } : { param: v & 0xffff, mods: 0 })
+            onChange(
+              v === undefined
+                ? { param: 0, mods: 0 }
+                : { param: v & 0xffff, mods: 0 },
+            )
           }
           collapsibleVisual
         />
@@ -1056,13 +1140,23 @@ function NumIn({
       value={value}
       onChange={(e) => {
         const v = Number(e.target.value);
-        onChange(Number.isFinite(v) ? Math.max(min, Math.min(max, Math.trunc(v))) : min);
+        onChange(
+          Number.isFinite(v)
+            ? Math.max(min, Math.min(max, Math.trunc(v)))
+            : min,
+        );
       }}
     />
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <label className="flex flex-col text-sm gap-1">
       <span className="text-base-content/70">{label}</span>

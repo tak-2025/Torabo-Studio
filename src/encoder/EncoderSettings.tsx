@@ -1,7 +1,7 @@
-import { useContext, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 
 import { ConnectionContext } from "../rpc/ConnectionContext";
-import { call_rpc } from "../rpc/logging";
+import { fetchLayerInfo } from "../rpc/keyboardInfo";
 import { encoderReadConfig, encoderWriteConfig } from "../backends";
 import { HidUsagePicker } from "../behaviors/HidUsagePicker";
 import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
@@ -26,7 +26,8 @@ const PAGE_KEYBOARD = 0x07;
 const PAGE_CONSUMER = 0x0c;
 
 /** ZMK encodes a usage as page << 16 | id; the picker speaks that, our wire doesn't. */
-const usageFromPage = (page: number, id: number): number => (page << 16) | (id & 0xffff);
+const usageFromPage = (page: number, id: number): number =>
+  (page << 16) | (id & 0xffff);
 
 type Status = PanelStatus;
 
@@ -39,7 +40,13 @@ const SLOT_LABEL: Record<SlotKey, string> = {
   btn: "押し込み",
 };
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <label className="flex flex-col gap-1">
       <span className="text-base-content/70 text-xs">{label}</span>
@@ -104,7 +111,10 @@ function BindingEditor({
             collapsibleVisual
             value={
               value.param
-                ? usageFromPage(isConsumer ? PAGE_CONSUMER : PAGE_KEYBOARD, value.param) |
+                ? usageFromPage(
+                    isConsumer ? PAGE_CONSUMER : PAGE_KEYBOARD,
+                    value.param,
+                  ) |
                   ((value.mods & 0xff) << 24)
                 : undefined
             }
@@ -117,7 +127,7 @@ function BindingEditor({
                       param: v & 0xffff,
                       // Consumer usages carry no modifiers.
                       mods: isConsumer ? 0 : (v >>> 24) & 0xff,
-                    }
+                    },
               )
             }
           />
@@ -155,9 +165,13 @@ function BindingEditor({
             className="select select-bordered select-sm w-40"
             aria-label="layer"
             value={value.param}
-            onChange={(e) => onChange({ ...value, param: Number(e.target.value) })}
+            onChange={(e) =>
+              onChange({ ...value, param: Number(e.target.value) })
+            }
           >
-            {(layerNames ?? Array.from({ length: 10 }, (_, i) => String(i))).map((name, i) => (
+            {(
+              layerNames ?? Array.from({ length: 10 }, (_, i) => String(i))
+            ).map((name, i) => (
               <option key={i} value={i}>
                 {i}: {name}
               </option>
@@ -189,33 +203,28 @@ export function EncoderSettings() {
   // doesn't snap the dropdown back. UI-only; never written to the wire.
   const [customLayers, setCustomLayers] = useState<Set<number>>(new Set());
 
+  // Cleared on disconnect only. Nothing is fetched until a read is asked for:
+  // see loadLayerInfo below and rpc/keyboardInfo.ts for why.
   useEffect(() => {
     if (!conn) {
       setActiveLayers(null);
       setLayerNames(null);
-      return;
     }
-    let cancelled = false;
-    (async () => {
-      try {
-        const km = (await call_rpc(conn, { keymap: { getKeymap: true } }))?.keymap?.getKeymap;
-        if (!cancelled && km?.layers) {
-          setActiveLayers(km.layers.length);
-          setLayerNames(km.layers.map((l, i) => l.name || i.toLocaleString()));
-        }
-      } catch (e) {
-        // Not fatal: without names we fall back to layer indices.
-        console.warn("encoder layer name fetch skipped:", e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  }, [conn]);
+
+  const loadLayerInfo = useCallback(async () => {
+    if (!conn) return;
+    const info = await fetchLayerInfo(conn);
+    // Not fatal: without names we fall back to layer indices.
+    if (!info) return;
+    setActiveLayers(info.activeLayers);
+    setLayerNames(info.layerNames);
   }, [conn]);
 
   const onRead = async () => {
     setStatus({ kind: "busy", msg: "読み込み中…" });
     try {
+      await loadLayerInfo();
       const raw = await encoderReadConfig();
       setCfg(decodeEnc(raw));
       setCustomLayers(new Set());
@@ -260,17 +269,21 @@ export function EncoderSettings() {
   };
 
   // Only show layers the keyboard actually has, when we know.
-  const shown = cfg ? cfg.layers.slice(0, activeLayers ?? cfg.layers.length) : [];
+  const shown = cfg
+    ? cfg.layers.slice(0, activeLayers ?? cfg.layers.length)
+    : [];
 
   return (
     <div className="flex flex-col items-start gap-4 p-4">
       <div className="text-base-content/70 text-sm">
         <p>
-          ロータリーエンコーダの<b>右回し・左回し・押し込み</b>を、レイヤーごとに割り当てます。
+          ロータリーエンコーダの<b>右回し・左回し・押し込み</b>
+          を、レイヤーごとに割り当てます。
         </p>
         <p>
-          エンコーダはキーマップ上のキーではないため、<b>キー位置を消費しません</b>。
-          <b>書き込む</b>で即反映＆本体に保存されます（再ビルド不要）。
+          エンコーダはキーマップ上のキーではないため、
+          <b>キー位置を消費しません</b>。<b>書き込む</b>
+          で即反映＆本体に保存されます（再ビルド不要）。
         </p>
       </div>
 
@@ -320,10 +333,14 @@ export function EncoderSettings() {
                   <div className="flex flex-col gap-3 border-l-2 border-base-300 pl-4">
                     {(["cw", "ccw"] as SlotKey[]).map((slot) => (
                       <div key={slot} className="flex flex-col gap-1">
-                        <span className="text-xs font-medium">{SLOT_LABEL[slot]}</span>
+                        <span className="text-xs font-medium">
+                          {SLOT_LABEL[slot]}
+                        </span>
                         <BindingEditor
                           value={layer[slot]}
-                          onChange={(b) => patchLayer(i, { [slot]: b } as Partial<EncLayerCfg>)}
+                          onChange={(b) =>
+                            patchLayer(i, { [slot]: b } as Partial<EncLayerCfg>)
+                          }
                           layerNames={layerNames}
                         />
                       </div>

@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useState } from "react";
 import { Save, Plus, Trash2 } from "lucide-react";
 
 import { ConnectionContext } from "../rpc/ConnectionContext";
-import { call_rpc } from "../rpc/logging";
+import { fetchLayoutKeys } from "../rpc/keyboardInfo";
 import { comboReadAll, comboWriteSlot } from "../backends";
 import { HidUsagePicker } from "../behaviors/HidUsagePicker";
 import { PhysicalLayout, KeyPosition } from "../keyboard/PhysicalLayout";
@@ -54,37 +54,24 @@ export function CombosPanel() {
   // key position). Fetched over the Studio RPC, same source as the keymap tab.
   const [positions, setPositions] = useState<KeyPosition[] | null>(null);
 
+  // Cleared on disconnect only. Nothing is fetched until a read is asked for:
+  // see loadLayout below and rpc/keyboardInfo.ts for why.
   useEffect(() => {
-    if (!conn) {
-      setPositions(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const resp = await call_rpc(conn, { keymap: { getPhysicalLayouts: true } });
-        const pl = resp?.keymap?.getPhysicalLayouts;
-        const layout = pl?.layouts?.[pl?.activeLayoutIndex || 0];
-        if (!layout || cancelled) return;
-        const ps: KeyPosition[] = layout.keys.map((k: any, i: number) => ({
-          id: `cpos-${i}`,
-          x: k.x / 100,
-          y: k.y / 100,
-          width: k.width / 100,
-          height: k.height / 100,
-          r: (k.r || 0) / 100,
-          rx: (k.rx || 0) / 100,
-          ry: (k.ry || 0) / 100,
-          children: <span className="text-[10px] font-mono opacity-80">{i}</span>,
-        }));
-        setPositions(ps);
-      } catch (e) {
-        console.warn("combo layout fetch skipped:", e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    if (!conn) setPositions(null);
+  }, [conn]);
+
+  const loadLayout = useCallback(async () => {
+    if (!conn) return;
+    const keys = await fetchLayoutKeys(conn);
+    if (!keys) return;
+    setPositions(
+      keys.map((k, i) => ({
+        ...k,
+        id: `cpos-${i}`,
+        // Each key's index IS its key position, which is what a combo stores.
+        children: <span className="text-[10px] font-mono opacity-80">{i}</span>,
+      })),
+    );
   }, [conn]);
 
   const onRead = useCallback(async () => {
@@ -94,13 +81,14 @@ export function CombosPanel() {
     }
     setStatus({ kind: "busy", msg: t("status.reading") });
     try {
+      await loadLayout();
       setCfg(decodeCombos(await comboReadAll()));
       setRevealed(new Set());
       setStatus({ kind: "ok", msg: t("status.loaded") });
     } catch (e) {
       setStatus({ kind: "error", msg: t("status.error") + String(e) });
     }
-  }, [conn, t]);
+  }, [conn, loadLayout, t]);
 
   const saveSlot = useCallback(
     async (idx: number, slot: ComboSlot) => {
@@ -115,20 +103,26 @@ export function CombosPanel() {
         setStatus({ kind: "error", msg: t("status.error") + String(e) });
       }
     },
-    [t]
+    [t],
   );
 
   const updateSlot = (idx: number, slot: ComboSlot) =>
-    setCfg((c) => (c ? { slots: c.slots.map((s, i) => (i === idx ? slot : s)) } : c));
+    setCfg((c) =>
+      c ? { slots: c.slots.map((s, i) => (i === idx ? slot : s)) } : c,
+    );
 
   // A combo "exists" once enabled or given key positions; otherwise it is hidden.
   const isRegistered = (s: ComboSlot) => s.enabled || s.positions.length > 0;
   const visible = cfg
-    ? cfg.slots.map((_, i) => i).filter((i) => isRegistered(cfg.slots[i]) || revealed.has(i))
+    ? cfg.slots
+        .map((_, i) => i)
+        .filter((i) => isRegistered(cfg.slots[i]) || revealed.has(i))
     : [];
   const addCombo = () => {
     if (!cfg) return;
-    const next = cfg.slots.findIndex((s, i) => !isRegistered(s) && !revealed.has(i));
+    const next = cfg.slots.findIndex(
+      (s, i) => !isRegistered(s) && !revealed.has(i),
+    );
     if (next < 0) return;
     updateSlot(next, emptySlot()); // clean defaults (timeout 50ms, disabled)
     setRevealed((r) => new Set(r).add(next));
@@ -145,10 +139,14 @@ export function CombosPanel() {
   return (
     <div className="p-4 overflow-auto flex flex-col gap-4 h-full">
       <div className="flex flex-col gap-1">
-        <h2 className="text-fluid-xl font-bold">ダイナミックコンボ（Bluetooth ライブ編集）</h2>
+        <h2 className="text-fluid-xl font-bold">
+          ダイナミックコンボ（Bluetooth ライブ編集）
+        </h2>
         <p className="text-sm text-base-content/70">
-          複数のキー位置を同時押しすると 1 つの動作（キー入力・モード切替・マクロ）を発火します。
-          キー位置の番号は keymap のキー位置（0 始まり）です。空 or 無効のコンボは何も起きません。
+          複数のキー位置を同時押しすると 1
+          つの動作（キー入力・モード切替・マクロ）を発火します。
+          キー位置の番号は keymap のキー位置（0 始まり）です。空 or
+          無効のコンボは何も起きません。
         </p>
       </div>
 
@@ -174,7 +172,8 @@ export function CombosPanel() {
           ))}
           {visible.length === 0 && (
             <p className="text-sm text-base-content/50">
-              登録済みのコンボはありません。下の「＋ コンボを追加」で作成できます。
+              登録済みのコンボはありません。下の「＋
+              コンボを追加」で作成できます。
             </p>
           )}
           {visible.length < CB_SLOTS && (
@@ -220,7 +219,8 @@ function ComboEditor({
     }
   };
   const addManual = () => {
-    if (slot.positions.length >= CB_MAX_POS || slot.positions.includes(manual)) return;
+    if (slot.positions.length >= CB_MAX_POS || slot.positions.includes(manual))
+      return;
     set({ positions: [...slot.positions, manual] });
   };
 
@@ -235,7 +235,9 @@ function ComboEditor({
       <div className="flex items-center justify-between gap-3 mb-2">
         <span className="font-bold">
           コンボ {index}
-          {!slot.enabled && <span className="opacity-50 text-sm font-normal"> （無効）</span>}
+          {!slot.enabled && (
+            <span className="opacity-50 text-sm font-normal"> （無効）</span>
+          )}
         </span>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-1 text-sm">
@@ -294,7 +296,9 @@ function ComboEditor({
                 min={0}
                 className="input input-bordered input-xs w-16"
                 value={manual}
-                onChange={(e) => setManual(Math.max(0, Number(e.target.value) | 0))}
+                onChange={(e) =>
+                  setManual(Math.max(0, Number(e.target.value) | 0))
+                }
                 aria-label="番号で位置を追加"
               />
               <button
@@ -336,7 +340,12 @@ function ComboEditor({
           className="select select-bordered select-sm"
           aria-label="発火する動作"
           value={slot.targetType}
-          onChange={(e) => set({ targetType: Number(e.target.value) as ComboTarget, param1: 0 })}
+          onChange={(e) =>
+            set({
+              targetType: Number(e.target.value) as ComboTarget,
+              param1: 0,
+            })
+          }
         >
           {TARGET_LABELS.map((t) => (
             <option key={t.value} value={t.value}>
@@ -359,7 +368,9 @@ function ComboEditor({
               (slot.timeoutMs === 0 ? " input-warning" : "")
             }
             value={slot.timeoutMs}
-            onChange={(e) => set({ timeoutMs: Math.max(0, Number(e.target.value) | 0) })}
+            onChange={(e) =>
+              set({ timeoutMs: Math.max(0, Number(e.target.value) | 0) })
+            }
           />
           <span className="opacity-60">ms</span>
           {slot.timeoutMs === 0 && (
@@ -380,7 +391,9 @@ function ComboEditor({
             min={0}
             className="input input-bordered input-sm w-24"
             value={slot.priorIdleMs}
-            onChange={(e) => set({ priorIdleMs: Math.max(0, Number(e.target.value) | 0) })}
+            onChange={(e) =>
+              set({ priorIdleMs: Math.max(0, Number(e.target.value) | 0) })
+            }
           />
           <span className="opacity-60">ms</span>
         </label>
@@ -396,7 +409,9 @@ function ComboEditor({
       </div>
 
       <div className="flex items-start gap-2 mt-3 flex-wrap text-sm">
-        <span className="font-medium w-24" title="レイヤー（layer）">有効モード</span>
+        <span className="font-medium w-24" title="レイヤー（layer）">
+          有効モード
+        </span>
         <div className="flex items-center gap-2 flex-wrap">
           <label className="flex items-center gap-1">
             <input
@@ -438,10 +453,26 @@ function TargetParam({
       set({ param1: makeKeycode(base, on ? mods | bit : mods & ~bit) });
     return (
       <div className="flex items-center gap-2 flex-wrap">
-        <ModCheck label="Ctrl" on={!!(mods & MOD_LCTL)} set={(v) => setMod(MOD_LCTL, v)} />
-        <ModCheck label="Shift" on={!!(mods & MOD_LSFT)} set={(v) => setMod(MOD_LSFT, v)} />
-        <ModCheck label="Alt" on={!!(mods & MOD_LALT)} set={(v) => setMod(MOD_LALT, v)} />
-        <ModCheck label="GUI" on={!!(mods & MOD_LGUI)} set={(v) => setMod(MOD_LGUI, v)} />
+        <ModCheck
+          label="Ctrl"
+          on={!!(mods & MOD_LCTL)}
+          set={(v) => setMod(MOD_LCTL, v)}
+        />
+        <ModCheck
+          label="Shift"
+          on={!!(mods & MOD_LSFT)}
+          set={(v) => setMod(MOD_LSFT, v)}
+        />
+        <ModCheck
+          label="Alt"
+          on={!!(mods & MOD_LALT)}
+          set={(v) => setMod(MOD_LALT, v)}
+        />
+        <ModCheck
+          label="GUI"
+          on={!!(mods & MOD_LGUI)}
+          set={(v) => setMod(MOD_LGUI, v)}
+        />
         <HidUsagePicker
           usagePages={USAGE_PAGES}
           value={base || undefined}
@@ -462,13 +493,23 @@ function TargetParam({
         min={0}
         className="input input-bordered input-sm w-24"
         value={slot.param1}
-        onChange={(e) => set({ param1: Math.max(0, Number(e.target.value) | 0) })}
+        onChange={(e) =>
+          set({ param1: Math.max(0, Number(e.target.value) | 0) })
+        }
       />
     </label>
   );
 }
 
-function ModCheck({ label, on, set }: { label: string; on: boolean; set: (on: boolean) => void }) {
+function ModCheck({
+  label,
+  on,
+  set,
+}: {
+  label: string;
+  on: boolean;
+  set: (on: boolean) => void;
+}) {
   return (
     <label className="flex items-center gap-1 text-xs">
       <input

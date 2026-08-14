@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useContext, useEffect, useState } from "react";
 
 import { ConnectionContext } from "../rpc/ConnectionContext";
-import { call_rpc } from "../rpc/logging";
+import { fetchLayerInfo } from "../rpc/keyboardInfo";
 import { trackballReadConfig, trackballWriteConfig } from "../backends";
 import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
 import { useT } from "../i18n";
@@ -21,16 +21,22 @@ function patchAxis(
   cfg: ZtcConfig,
   layer: number,
   axis: "x" | "y",
-  patch: Partial<AxisCfg>
+  patch: Partial<AxisCfg>,
 ): ZtcConfig {
   const layers = cfg.layers.map((l, i) =>
-    i === layer ? { ...l, [axis]: { ...l[axis], ...patch } } : l
+    i === layer ? { ...l, [axis]: { ...l[axis], ...patch } } : l,
   );
   return { ...cfg, layers };
 }
 
-function patchLayer(cfg: ZtcConfig, layer: number, patch: Partial<LayerCfg>): ZtcConfig {
-  const layers = cfg.layers.map((l, i) => (i === layer ? { ...l, ...patch } : l));
+function patchLayer(
+  cfg: ZtcConfig,
+  layer: number,
+  patch: Partial<LayerCfg>,
+): ZtcConfig {
+  const layers = cfg.layers.map((l, i) =>
+    i === layer ? { ...l, ...patch } : l,
+  );
   return { ...cfg, layers };
 }
 
@@ -48,39 +54,33 @@ export function TrackballSettings() {
   // failed → layer inputs fall back to plain number inputs. UI-only.
   const [layerNames, setLayerNames] = useState<string[] | null>(null);
 
+  // Cleared on disconnect only. Nothing is fetched until a read is asked for:
+  // see loadLayerInfo below and rpc/keyboardInfo.ts for why.
   useEffect(() => {
     if (!conn) {
       setActiveLayers(null);
       setLayerNames(null);
-      return;
     }
-    let cancelled = false;
-    (async () => {
-      try {
-        const km = (await call_rpc(conn, { keymap: { getKeymap: true } }))?.keymap
-          ?.getKeymap;
-        if (!cancelled && km?.layers) {
-          setActiveLayers(km.layers.length);
-          setLayerNames(km.layers.map((l, i) => l.name || i.toLocaleString()));
-        }
-      } catch (e) {
-        console.warn("trackball layer count fetch skipped:", e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  }, [conn]);
+
+  const loadLayerInfo = useCallback(async () => {
+    if (!conn) return;
+    const info = await fetchLayerInfo(conn);
+    if (!info) return;
+    setActiveLayers(info.activeLayers);
+    setLayerNames(info.layerNames);
   }, [conn]);
 
   const onRead = useCallback(async () => {
     setStatus({ kind: "busy", msg: t("status.reading") });
     try {
+      await loadLayerInfo();
       setCfg(decodeZtc(await trackballReadConfig()));
       setStatus({ kind: "ok", msg: t("status.loaded") });
     } catch (e) {
       setStatus({ kind: "error", msg: t("status.error") + String(e) });
     }
-  }, [t]);
+  }, [loadLayerInfo, t]);
 
   const onWrite = useCallback(async () => {
     if (!cfg) return;
@@ -109,9 +109,12 @@ export function TrackballSettings() {
   return (
     <div className="p-4 overflow-auto flex flex-col gap-4 h-full">
       <div className="flex flex-col gap-1">
-        <h2 className="text-fluid-xl font-bold">トラックボール設定（Bluetooth ライブ編集）</h2>
+        <h2 className="text-fluid-xl font-bold">
+          トラックボール設定（Bluetooth ライブ編集）
+        </h2>
         <p className="text-sm text-base-content/70">
-          ① <b>読み込む</b>で現在値を取得 → ② 表の値を変更 → ③ <b>書き込む</b>で即反映＆保存
+          ① <b>読み込む</b>で現在値を取得 → ② 表の値を変更 → ③ <b>書き込む</b>
+          で即反映＆保存
         </p>
       </div>
       <PanelActionBar
@@ -126,14 +129,18 @@ export function TrackballSettings() {
       ) : (
         <>
           <div className="flex flex-wrap items-end gap-6 rounded-md border border-base-300 bg-base-200/40 p-4 self-stretch">
-            <h3 className="font-semibold text-base w-full">一時レイヤー切替（ボール操作で切替）</h3>
+            <h3 className="font-semibold text-base w-full">
+              一時レイヤー切替（ボール操作で切替）
+            </h3>
             <Field label="切替先レイヤー">
               {layerNames ? (
                 <select
                   className="select select-bordered input-md w-40 text-base"
                   aria-label="temp-layer target"
                   value={cfg.tempTarget}
-                  onChange={(e) => setCfg({ ...cfg, tempTarget: Number(e.target.value) })}
+                  onChange={(e) =>
+                    setCfg({ ...cfg, tempTarget: Number(e.target.value) })
+                  }
                 >
                   {layerNames.slice(0, layerCount).map((name, i) => (
                     <option key={i} value={i}>{`${i}: ${name}`}</option>
@@ -164,14 +171,30 @@ export function TrackballSettings() {
               {t("help.termsSummary")}
             </summary>
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 mt-2">
-              <dt className="font-semibold text-base-content whitespace-nowrap">動作</dt>
-              <dd>Move=カーソル移動 / Scroll=スクロール / Off=無効（その軸を止める）</dd>
-              <dt className="font-semibold text-base-content whitespace-nowrap">向き</dt>
+              <dt className="font-semibold text-base-content whitespace-nowrap">
+                動作
+              </dt>
+              <dd>
+                Move=カーソル移動 / Scroll=スクロール /
+                Off=無効（その軸を止める）
+              </dd>
+              <dt className="font-semibold text-base-content whitespace-nowrap">
+                向き
+              </dt>
               <dd>reverse にチェックで逆方向</dd>
-              <dt className="font-semibold text-base-content whitespace-nowrap">速度(÷)</dt>
+              <dt className="font-semibold text-base-content whitespace-nowrap">
+                速度(÷)
+              </dt>
               <dd>1=最速、数字が大きいほど遅い（最大32）</dd>
-              <dt className="font-semibold text-base-content whitespace-nowrap" title="レイヤー（layer）">一時レイヤー</dt>
-              <dd>✓のレイヤーでボールを動かすと、上の「切替先レイヤー」へ一時的に切替（レイヤー＝Fnキーのように切り替わるキー配置のセット）</dd>
+              <dt
+                className="font-semibold text-base-content whitespace-nowrap"
+                title="レイヤー（layer）"
+              >
+                一時レイヤー
+              </dt>
+              <dd>
+                ✓のレイヤーでボールを動かすと、上の「切替先レイヤー」へ一時的に切替（レイヤー＝Fnキーのように切り替わるキー配置のセット）
+              </dd>
             </dl>
           </details>
           {/* shrink-0: without it, this overflow container gets min-height:0 and
@@ -179,68 +202,76 @@ export function TrackballSettings() {
               (table stays in the DOM but is clipped → invisible). See the same fix
               in TrackpadSettingsV2. */}
           <div className="shrink-0 overflow-x-auto max-w-full self-stretch border border-base-300 rounded-md">
-          <table className="table table-zebra w-auto [&_th]:text-left [&_td]:text-left [&_th]:px-5 [&_th]:py-3 [&_td]:px-5 [&_td]:py-3 [&_td]:text-sm [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:bg-base-200 [&_thead_th]:z-10 [&_tbody_tr:hover]:bg-base-200/50">
-            <thead>
-              <tr className="bg-base-200">
-                <th title="レイヤー（layer）">レイヤー</th>
-                <th>軸</th>
-                <th>
-                  動作
-                  <br />
-                  <span className="font-normal opacity-60">Role</span>
-                </th>
-                <th>
-                  向き
-                  <br />
-                  <span className="font-normal opacity-60">reverse</span>
-                </th>
-                <th>
-                  速度(÷)
-                  <br />
-                  <span className="font-normal opacity-60">大きいほど遅い</span>
-                </th>
-                <th title="レイヤー（layer）">
-                  一時レイヤー
-                  <br />
-                  <span className="font-normal opacity-60">temp</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {cfg.layers.slice(0, layerCount).map((l, i) => {
-                const layerName =
-                  layerNames && layerNames[i] !== i.toLocaleString()
-                    ? layerNames[i]
-                    : undefined;
-                return (
-                <Fragment key={i}>
-                  <AxisRow
-                    firstOfLayer
-                    layerCell={i}
-                    layerName={layerName}
-                    axisLabel="X"
-                    axis={l.x}
-                    onChange={(p) => setCfg(patchAxis(cfg, i, "x", p))}
-                    tempCell={
-                      <input
-                        type="checkbox"
-                        className="checkbox checkbox-sm"
-                        aria-label={`layer ${i} temp-layer enable`}
-                        checked={l.tempEnable}
-                        onChange={(e) => setCfg(patchLayer(cfg, i, { tempEnable: e.target.checked }))}
+            <table className="table table-zebra w-auto [&_th]:text-left [&_td]:text-left [&_th]:px-5 [&_th]:py-3 [&_td]:px-5 [&_td]:py-3 [&_td]:text-sm [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:bg-base-200 [&_thead_th]:z-10 [&_tbody_tr:hover]:bg-base-200/50">
+              <thead>
+                <tr className="bg-base-200">
+                  <th title="レイヤー（layer）">レイヤー</th>
+                  <th>軸</th>
+                  <th>
+                    動作
+                    <br />
+                    <span className="font-normal opacity-60">Role</span>
+                  </th>
+                  <th>
+                    向き
+                    <br />
+                    <span className="font-normal opacity-60">reverse</span>
+                  </th>
+                  <th>
+                    速度(÷)
+                    <br />
+                    <span className="font-normal opacity-60">
+                      大きいほど遅い
+                    </span>
+                  </th>
+                  <th title="レイヤー（layer）">
+                    一時レイヤー
+                    <br />
+                    <span className="font-normal opacity-60">temp</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {cfg.layers.slice(0, layerCount).map((l, i) => {
+                  const layerName =
+                    layerNames && layerNames[i] !== i.toLocaleString()
+                      ? layerNames[i]
+                      : undefined;
+                  return (
+                    <Fragment key={i}>
+                      <AxisRow
+                        firstOfLayer
+                        layerCell={i}
+                        layerName={layerName}
+                        axisLabel="X"
+                        axis={l.x}
+                        onChange={(p) => setCfg(patchAxis(cfg, i, "x", p))}
+                        tempCell={
+                          <input
+                            type="checkbox"
+                            className="checkbox checkbox-sm"
+                            aria-label={`layer ${i} temp-layer enable`}
+                            checked={l.tempEnable}
+                            onChange={(e) =>
+                              setCfg(
+                                patchLayer(cfg, i, {
+                                  tempEnable: e.target.checked,
+                                }),
+                              )
+                            }
+                          />
+                        }
                       />
-                    }
-                  />
-                  <AxisRow
-                    axisLabel="Y"
-                    axis={l.y}
-                    onChange={(p) => setCfg(patchAxis(cfg, i, "y", p))}
-                  />
-                </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
+                      <AxisRow
+                        axisLabel="Y"
+                        axis={l.y}
+                        onChange={(p) => setCfg(patchAxis(cfg, i, "y", p))}
+                      />
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
 
           <div className="rounded-md border border-info/40 bg-info/10 px-4 py-3 text-sm leading-relaxed text-base-content/80 self-start max-w-2xl">
@@ -274,10 +305,7 @@ function AxisRow({
   return (
     <tr className={firstOfLayer ? "border-t-2 border-base-300" : ""}>
       {layerCell !== undefined && (
-        <td
-          rowSpan={2}
-          className="align-middle border-r border-base-200"
-        >
+        <td rowSpan={2} className="align-middle border-r border-base-200">
           <div className="font-bold text-base">{layerCell}</div>
           {layerName && (
             <div className="text-xs font-normal text-base-content/60 mt-0.5">
@@ -358,13 +386,23 @@ function NumIn({
       value={value}
       onChange={(e) => {
         const v = Number(e.target.value);
-        onChange(Number.isFinite(v) ? Math.max(min, Math.min(max, Math.trunc(v))) : min);
+        onChange(
+          Number.isFinite(v)
+            ? Math.max(min, Math.min(max, Math.trunc(v)))
+            : min,
+        );
       }}
     />
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <label className="flex flex-col text-sm gap-1">
       <span className="text-base-content/70">{label}</span>
