@@ -26,19 +26,55 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export async function connect(): Promise<RpcTransport> {
+/**
+ * What the chooser is allowed to list.
+ *
+ * The obvious filter — the ZMK Studio service — does not work: ZMK advertises
+ * only appearance, flags and two 16-bit UUIDs (HID and battery, see zmk's
+ * ble.c), so the 128-bit Studio UUID never appears in an advertisement and
+ * filtering on it yields an empty picker. That is why the upstream transport's
+ * filter finds nothing here, and why Torabo-Float-Web accepts all devices.
+ *
+ * So we match what ZMK actually broadcasts:
+ *  - battery service, which every ZMK build advertises. HID would be the
+ *    tighter match but Web Bluetooth blocklists it, so it cannot be filtered on.
+ *  - the keyboard's name, which ZMK forces into the advertisement
+ *    (BT_LE_ADV_OPT_FORCE_NAME_IN_AD). Covers "torabo-tsuki"; a renamed
+ *    keyboard falls back to the battery filter.
+ *  - the Studio service anyway, in case a future firmware does advertise it.
+ *
+ * Filters are OR'd. This narrows the list to keyboard-ish devices instead of
+ * every radio in the room — but it can only match a device that is currently
+ * advertising, so `allDevices` stays available for anything it misses.
+ */
+const BATTERY_SERVICE = 0x180f;
+
+const KEYBOARD_FILTERS: BluetoothLEScanFilter[] = [
+  { services: [BATTERY_SERVICE] },
+  { namePrefix: "torabo" },
+  { services: [RPC_SERVICE] },
+];
+
+export interface ConnectOptions {
+  /** Skip the filters and list every device, for a keyboard they miss. */
+  allDevices?: boolean;
+}
+
+export async function connect(
+  options: ConnectOptions = {},
+): Promise<RpcTransport> {
   if (!navigator.bluetooth) {
     throw new Error(
       "このブラウザは Web Bluetooth に対応していません（Chrome か Edge をご利用ください）。",
     );
   }
 
-  // acceptAllDevices, not a service filter: the chooser can only match what the
-  // keyboard puts in its advertisement, and filtering on a service it does not
-  // advertise shows an empty picker with no way to tell why. Torabo-Float-Web
-  // reaches this same keyboard the same way.
   const device = await navigator.bluetooth
-    .requestDevice({ acceptAllDevices: true, optionalServices: ALL_SERVICES })
+    .requestDevice(
+      options.allDevices
+        ? { acceptAllDevices: true, optionalServices: ALL_SERVICES }
+        : { filters: KEYBOARD_FILTERS, optionalServices: ALL_SERVICES },
+    )
     .catch((e) => {
       if (e instanceof DOMException && e.name === "NotFoundError") {
         throw new UserCancelledError("User cancelled the connection attempt", {
