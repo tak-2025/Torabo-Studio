@@ -358,10 +358,13 @@ async function reportCapabilities() {
   const hasGetDevices = typeof navigator.bluetooth.getDevices === "function";
   if (!hasGetDevices) {
     report.innerHTML =
-      "<strong>getDevices() が使えません。</strong><br />" +
-      "接続中のキーボードにブラウザから届く手段がありません。" +
-      "edge://flags で <code>#enable-web-bluetooth-new-permissions-backend</code> を " +
-      "Enabled にすると使えるようになる可能性があります（要再起動）。";
+      "<strong>getDevices() が使えません（Edge 151 / Chromium で確認済み）。</strong><br />" +
+      "接続中のキーボードにブラウザから届く手段はありません。" +
+      "一覧を開いてからプロファイル切替キーを押すか電源を入れ直して、" +
+      "広告している数秒の間に選んでください。<br />" +
+      "<small>edge://flags の #enable-web-bluetooth-new-permissions-backend で " +
+      "有効化できる可能性はありますが、許可したサイトが以後は無断で再接続" +
+      "できるようになるため、常用はお勧めしません。</small>";
     return;
   }
 
