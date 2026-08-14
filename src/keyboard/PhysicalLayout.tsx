@@ -19,6 +19,10 @@ export type KeyPosition = PropsWithChildren<{
   ry?: number;
 }>;
 
+/** Breathing room left around the board in "auto", per side, as a fraction of
+ *  the container. Small on purpose: the point of auto is to fill the space. */
+const AUTO_ZOOM_MARGIN = 0.04;
+
 export type LayoutZoom = number | "auto";
 
 export function deserializeLayoutZoom(value: string): LayoutZoom {
@@ -74,6 +78,50 @@ function scalePosition(
   };
 }
 
+/**
+ * Bounding box of the keys once rotation is applied, in layout units.
+ *
+ * A rotated key sweeps outside the rectangle its x/y/width/height describe, so
+ * the four corners have to be rotated about the key's own origin before being
+ * folded into the extents. Origins can also be negative, hence min as well as
+ * max: the caller shifts everything so the drawn area starts at 0,0.
+ */
+function layoutExtents(positions: Array<KeyPosition>) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const p of positions) {
+    const rad = ((p.r || 0) * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    // scalePosition rotates about (rx, ry), defaulting to the key's own corner.
+    const ox = p.rx ?? p.x;
+    const oy = p.ry ?? p.y;
+
+    for (const [cx, cy] of [
+      [p.x, p.y],
+      [p.x + p.width, p.y],
+      [p.x, p.y + p.height],
+      [p.x + p.width, p.y + p.height],
+    ]) {
+      const dx = cx - ox;
+      const dy = cy - oy;
+      const x = ox + dx * cos - dy * sin;
+      const y = oy + dx * sin + dy * cos;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  // No keys: a zero-sized box, rather than Infinity in a style attribute.
+  if (!positions.length) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  return { minX, minY, maxX, maxY };
+}
+
 export const PhysicalLayout = ({
   positions,
   selectedPosition,
@@ -94,10 +142,17 @@ export const PhysicalLayout = ({
 
     const calculateScale = () => {
       if (props.zoom === "auto") {
-        const padding = Math.min(window.innerWidth, window.innerHeight) * 0.05; // Padding when in auto mode
+        // Margin as a fraction of the space available, not an absolute derived
+        // from the window. Upstream takes 5% of the smaller window dimension
+        // and adds it to BOTH sides of BOTH axes of the board — which lands on
+        // a short, wide split keyboard hardest: 44px a side against a 226px-tall
+        // board is a third of its height spent on margin, and the board renders
+        // at ~70% of the room it has. Scaling the margin with the container
+        // keeps the proportion the same whatever the window size.
+        const usable = 1 - 2 * AUTO_ZOOM_MARGIN;
         const newScale = Math.min(
-          parent.clientWidth / (element.clientWidth + 2 * padding),
-          parent.clientHeight / (element.clientHeight + 2 * padding),
+          (parent.clientWidth * usable) / element.clientWidth,
+          (parent.clientHeight * usable) / element.clientHeight,
         );
         setScale(newScale);
       } else {
@@ -119,16 +174,31 @@ export const PhysicalLayout = ({
     };
   }, [props.zoom]);
 
-  // TODO: Add a bit of padding for rotation when supported
-  let rightMost = positions
-    .map((k) => k.x + k.width)
-    .reduce((a, b) => Math.max(a, b), 0);
-  let bottomMost = positions
-    .map((k) => k.y + k.height)
-    .reduce((a, b) => Math.max(a, b), 0);
+  // Extents of what is actually drawn, rotation included. Taking the corners
+  // unrotated — as this did — leaves a thumb cluster hanging outside the box:
+  // the box is centred, the keys are not, and at a high zoom the bottom row can
+  // be clipped by a parent that hides overflow. For a board with no rotation
+  // this comes out identical to the old two lines.
+  const { minX, minY, maxX, maxY } = layoutExtents(positions);
+  const rightMost = maxX - minX;
+  const bottomMost = maxY - minY;
 
   const positionItems = positions.map((p, idx) => (
-    <div className="absolute" style={scalePosition(p, oneU)}>
+    // Shift so the top-left of the drawn area sits at the box origin. rx/ry move
+    // with x/y, which leaves the rotation origin where it was relative to the key.
+    <div
+      className="absolute"
+      style={scalePosition(
+        {
+          ...p,
+          x: p.x - minX,
+          y: p.y - minY,
+          rx: p.rx === undefined ? undefined : p.rx - minX,
+          ry: p.ry === undefined ? undefined : p.ry - minY,
+        },
+        oneU,
+      )}
+    >
       <div
         key={p.id}
         onClick={() => onPositionClicked?.(idx)}
@@ -137,7 +207,9 @@ export const PhysicalLayout = ({
         <Key
           oneU={oneU}
           selected={
-            isPositionSelected ? isPositionSelected(idx) : idx === selectedPosition
+            isPositionSelected
+              ? isPositionSelected(idx)
+              : idx === selectedPosition
           }
           {...p}
         />
