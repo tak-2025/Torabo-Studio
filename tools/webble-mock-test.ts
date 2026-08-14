@@ -10,6 +10,7 @@
  * This is a dev tool: it is not part of any build input and ships nowhere.
  */
 
+import { connect } from "../src/backends/webble/transport";
 import { makeConfigBackend } from "../src/backends/webble/config";
 import { CONFIG_SERVICES } from "../src/backends/webble/uuids";
 
@@ -73,6 +74,87 @@ function mockServer(chars: Record<string, CharSpec>, absent: string[] = []) {
   return server as unknown as BluetoothRemoteGATTServer & {
     discoveries: () => number;
   };
+}
+
+/** A characteristic that records the order of operations against it. */
+function fakeRpcCharacteristic(log: string[]) {
+  const listeners = new Set<(ev: Event) => void>();
+  const chr = {
+    value: undefined as DataView | undefined,
+    addEventListener(_t: string, fn: (ev: Event) => void) {
+      log.push("addEventListener");
+      listeners.add(fn);
+    },
+    removeEventListener(_t: string, fn: (ev: Event) => void) {
+      listeners.delete(fn);
+    },
+    async stopNotifications() {
+      log.push("stopNotifications");
+    },
+    async startNotifications() {
+      log.push("startNotifications");
+    },
+    async writeValueWithoutResponse() {
+      log.push("write");
+    },
+    notify(bytes: Uint8Array) {
+      chr.value = new DataView(bytes.buffer);
+      for (const fn of listeners) fn({ target: chr } as unknown as Event);
+    },
+  };
+  return chr;
+}
+
+/** Minimal navigator.bluetooth that hands back the fake characteristic. */
+function installFakeBluetooth(
+  rpcChar: ReturnType<typeof fakeRpcCharacteristic>,
+  log: string[],
+) {
+  const deviceListeners = new Set<(ev: Event) => void>();
+  const device = {
+    name: "torabo-tsuki",
+    addEventListener: (_t: string, fn: (ev: Event) => void) =>
+      deviceListeners.add(fn),
+    removeEventListener: (_t: string, fn: (ev: Event) => void) =>
+      deviceListeners.delete(fn),
+    gatt: {
+      connected: false,
+      async connect() {
+        log.push("gatt.connect");
+        device.gatt.connected = true;
+        return {
+          connected: true,
+          async getPrimaryService() {
+            return {
+              async getCharacteristic() {
+                return rpcChar;
+              },
+            };
+          },
+          disconnect() {
+            device.gatt.connected = false;
+            for (const fn of deviceListeners)
+              fn(new Event("gattserverdisconnected"));
+          },
+        };
+      },
+      disconnect() {
+        device.gatt.connected = false;
+        for (const fn of [...deviceListeners])
+          fn(new Event("gattserverdisconnected"));
+      },
+    },
+  };
+  // navigator.bluetooth is a getter-only accessor, so it has to be redefined
+  // rather than assigned.
+  Object.defineProperty(navigator, "bluetooth", {
+    configurable: true,
+    value: {
+      async requestDevice() {
+        return device;
+      },
+    },
+  });
 }
 
 async function run() {
@@ -207,6 +289,45 @@ async function run() {
       w.length === 1 && w[0].length === 200,
       `writes=${w.length}, len=${w[0]?.length}`,
     );
+  }
+
+  // 8. Connect, disconnect, connect again — the sequence that sent the app back
+  //    to the connect screen. The transport must not be handed over before
+  //    notifications are live, or the first RPC's reply lands unheard.
+  {
+    const log: string[] = [];
+    const rpcChar = fakeRpcCharacteristic(log);
+    installFakeBluetooth(rpcChar, log);
+
+    for (const round of ["1回目", "2回目"]) {
+      log.length = 0;
+      const transport = await connect();
+
+      const subscribedBeforeReturn = log.includes("startNotifications");
+      const listenerBeforeSubscribe =
+        log.indexOf("addEventListener") < log.indexOf("startNotifications");
+      check(
+        `${round}: 返す前に購読が完了している`,
+        subscribedBeforeReturn,
+        log.join(" → "),
+      );
+      check(
+        `${round}: 購読より先に受信ハンドラを付けている`,
+        listenerBeforeSubscribe,
+        log.join(" → "),
+      );
+
+      // A notification sent the instant the transport exists must be delivered.
+      const reader = transport.readable.getReader();
+      rpcChar.notify(new Uint8Array([1, 2, 3]));
+      const { value } = await reader.read();
+      check(`${round}: 直後の通知を取りこぼさない`, value?.length === 3);
+      reader.releaseLock();
+
+      transport.abortController.abort("test disconnect");
+      // Let the disconnect event settle before reconnecting.
+      await new Promise((r) => setTimeout(r, 0));
+    }
   }
 
   // Render. Details are error messages, so they go in as text, never markup.

@@ -194,29 +194,47 @@ async function attach(
 
   const abortController = new AbortController();
 
+  // The read path is wired and subscribed BEFORE this function returns, because
+  // the caller writes the first RPC the moment it has the transport. Doing the
+  // subscribe inside start() does not hold anything back — the stream is usable
+  // as soon as it is constructed — so the request could go out while the CCCD
+  // write was still in flight, and the reply notification would land with
+  // nobody listening. The first RPC has a one second budget; miss it and the
+  // app reports a failed connection and returns to the connect screen.
+  //
+  // It bites on a RECONNECT in particular: a bonded device remembers its CCCD
+  // state, so stop+start is two real round trips rather than a local no-op, and
+  // the window is wide enough to lose the race.
+  let enqueue!: (bytes: Uint8Array) => void;
+  let close!: () => void;
   const readable = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      // Reconnecting to a device we already subscribed to silently delivers
-      // nothing unless notifications are stopped first (upstream hits this too).
-      await rpc.stopNotifications().catch(() => undefined);
-      await rpc.startNotifications();
-
-      const onValue = (ev: Event) => {
-        const value = (ev.target as BluetoothRemoteGATTCharacteristic).value;
-        if (value) controller.enqueue(new Uint8Array(value.buffer));
-      };
-      rpc.addEventListener("characteristicvaluechanged", onValue);
-
-      const onDisconnected = () => {
-        rpc.removeEventListener("characteristicvaluechanged", onValue);
-        device.removeEventListener("gattserverdisconnected", onDisconnected);
-        // The handles this backend holds belong to a link that no longer exists.
-        registerBackend(null);
-        controller.close();
-      };
-      device.addEventListener("gattserverdisconnected", onDisconnected);
+    // Called synchronously by the constructor, so both are set below.
+    start(controller) {
+      enqueue = (bytes) => controller.enqueue(bytes);
+      close = () => controller.close();
     },
   });
+
+  const onValue = (ev: Event) => {
+    const value = (ev.target as BluetoothRemoteGATTCharacteristic).value;
+    if (value) enqueue(new Uint8Array(value.buffer));
+  };
+  const onDisconnected = () => {
+    rpc.removeEventListener("characteristicvaluechanged", onValue);
+    device.removeEventListener("gattserverdisconnected", onDisconnected);
+    // The handles this backend holds belong to a link that no longer exists.
+    registerBackend(null);
+    close();
+  };
+
+  // Listener first, then subscribe: nothing should be able to arrive unheard.
+  rpc.addEventListener("characteristicvaluechanged", onValue);
+  device.addEventListener("gattserverdisconnected", onDisconnected);
+
+  // Reconnecting to a device we already subscribed to silently delivers nothing
+  // unless notifications are stopped first (upstream hits this too).
+  await rpc.stopNotifications().catch(() => undefined);
+  await rpc.startNotifications();
 
   const writable = new WritableStream<Uint8Array>({
     async write(chunk) {
