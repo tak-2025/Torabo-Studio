@@ -79,8 +79,8 @@ const ja: Dict = {
   "connect.steps.title": "一覧にキーボードが出ないときは（Windows）",
   "connect.steps.open": "Bluetooth の接続ボタンを押して、機器の一覧を開く。",
   "connect.steps.switch":
-    "キーボードのプロファイル切替キー（&bt BT_SEL）で別のプロファイルへ切り替える" +
-    "。切断されて広告が始まり、一覧に torabo-tsuki が出ます。",
+    "キーボードのプロファイル切替キー（&bt BT_SEL）で別のプロファイルへ切り替える。" +
+    "PC との接続が切れて見つけられる状態になり、一覧に torabo-tsuki が出ます。",
   "connect.steps.switchBack":
     "出てきたら、いつも使っているプロファイルに戻す。" +
     "戻さないとキーボードで操作できません（一度出た機器は、戻しても選べます）。",
@@ -220,7 +220,7 @@ const en: Dict = {
   "connect.steps.open": "Press the Bluetooth button to open the device list.",
   "connect.steps.switch":
     "Press your profile-switch key (&bt BT_SEL) to move to another profile. " +
-    "That disconnects it, it starts advertising, and it appears in the list.",
+    "That disconnects it, so it becomes discoverable and appears in the list.",
   "connect.steps.switchBack":
     "Once it appears, switch back to the profile you normally use — otherwise " +
     "you cannot type. A device that has been listed stays selectable.",
