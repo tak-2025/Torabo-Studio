@@ -9,16 +9,17 @@ import { Dispatch, useCallback, useEffect, useState } from "react";
 import { ConnectModal, TransportFactory } from "./ConnectModal";
 
 import type { RpcTransport } from "@zmkfirmware/zmk-studio-ts-client/transport/index";
-import { connect as gatt_connect } from "@zmkfirmware/zmk-studio-ts-client/transport/gatt";
 import { connect as serial_connect } from "@zmkfirmware/zmk-studio-ts-client/transport/serial";
+import { connect as webble_connect } from "./backends/webble/transport";
 import {
   connect as tauri_ble_connect,
   list_devices as ble_list_devices,
-} from "./tauri/ble";
+} from "./backends/tauri/ble";
 import {
   connect as tauri_serial_connect,
   list_devices as serial_list_devices,
-} from "./tauri/serial";
+} from "./backends/tauri/serial";
+import { isTauri } from "./backends";
 import MainPanels from "./MainPanels";
 import { UndoRedoContext, useUndoRedo } from "./undoRedo";
 import { usePub, useSub } from "./usePubSub";
@@ -30,18 +31,31 @@ import { AppFooter } from "./AppFooter";
 import { AboutModal } from "./AboutModal";
 import { LicenseNoticeModal } from "./misc/LicenseNoticeModal";
 
-declare global {
-  interface Window {
-    __TAURI_INTERNALS__?: object;
-  }
-}
-
 const TRANSPORTS: TransportFactory[] = [
-  navigator.serial && { label: "USB", connect: serial_connect },
-  ...(navigator.bluetooth && navigator.userAgent.indexOf("Linux") >= 0
-    ? [{ label: "Bluetooth", connect: gatt_connect }]
+  navigator.serial && {
+    label: "USB",
+    // In a browser this reaches the keymap only: the torabo config services are
+    // GATT, so USB cannot see them. The desktop build overrides this entry below.
+    noteKey: isTauri() ? undefined : "connect.note.webSerial",
+    connect: serial_connect,
+  },
+  // Our own Web Bluetooth transport, not the ts-client one: it keeps the GATT
+  // server so the torabo config services are reachable on the same link. It also
+  // is not gated to Linux — upstream restricts its transport that way, but this
+  // keyboard's encrypted characteristics have been exercised from Chrome on
+  // Windows (see Torabo-Float-Web), so the gate would only remove a path that
+  // works. A platform where it genuinely fails reports it at connect time.
+  ...(!isTauri() && navigator.bluetooth
+    ? [
+        {
+          label: "Bluetooth",
+          isWireless: true,
+          noteKey: "connect.note.webBluetooth",
+          connect: webble_connect,
+        },
+      ]
     : []),
-  ...(window.__TAURI_INTERNALS__
+  ...(isTauri()
     ? [
         {
           label: "Bluetooth",
@@ -53,7 +67,7 @@ const TRANSPORTS: TransportFactory[] = [
         },
       ]
     : []),
-  ...(window.__TAURI_INTERNALS__
+  ...(isTauri()
     ? [
         {
           label: "USB",
@@ -68,7 +82,7 @@ const TRANSPORTS: TransportFactory[] = [
 
 async function listen_for_notifications(
   notification_stream: ReadableStream<Notification>,
-  signal: AbortSignal
+  signal: AbortSignal,
 ): Promise<void> {
   let reader = notification_stream.getReader();
   const onAbort = () => {
@@ -93,7 +107,7 @@ async function listen_for_notifications(
       pub("rpc_notification", value);
 
       const subsystem = Object.entries(value).find(
-        ([_k, v]) => v !== undefined
+        ([_k, v]) => v !== undefined,
       );
       if (!subsystem) {
         continue;
@@ -126,7 +140,7 @@ async function connect(
   transport: RpcTransport,
   setConn: Dispatch<ConnectionState>,
   setConnectedDeviceName: Dispatch<string | undefined>,
-  signal: AbortSignal
+  signal: AbortSignal,
 ) {
   let conn = await create_rpc_connection(transport, { signal });
 
@@ -171,7 +185,7 @@ function App() {
   const [connectionAbort, setConnectionAbort] = useState(new AbortController());
 
   const [lockState, setLockState] = useState<LockState>(
-    LockState.ZMK_STUDIO_CORE_LOCK_STATE_LOCKED
+    LockState.ZMK_STUDIO_CORE_LOCK_STATE_LOCKED,
   );
 
   useSub("rpc_notification.core.lockStateChanged", (ls) => {
@@ -195,7 +209,7 @@ function App() {
 
       setLockState(
         locked_resp.core?.getLockState ||
-          LockState.ZMK_STUDIO_CORE_LOCK_STATE_LOCKED
+          LockState.ZMK_STUDIO_CORE_LOCK_STATE_LOCKED,
       );
     }
 
@@ -277,7 +291,7 @@ function App() {
       setConnectionAbort(ac);
       connect(t, setConn, setConnectedDeviceName, ac.signal);
     },
-    [setConn, setConnectedDeviceName, setConnectedDeviceName]
+    [setConn, setConnectedDeviceName, setConnectedDeviceName],
   );
 
   return (

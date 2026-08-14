@@ -4,6 +4,10 @@ import react from "@vitejs/plugin-react-swc";
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // GitHub Pages serves a project site from /<repo>/, so the asset URLs have to
+  // be built with that prefix or every one of them 404s. Set by the Pages
+  // workflow only: the desktop build loads from the bundle root and must stay "/".
+  base: process.env.PAGES_BASE || "/",
   // prevent vite from obscuring rust errors
   clearScreen: false,
   // Tauri expects a fixed port, fail if that port is not available

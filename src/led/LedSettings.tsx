@@ -2,7 +2,7 @@ import { useContext, useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 
 import { ConnectionContext } from "../rpc/ConnectionContext";
-import { ledReadConfig, ledWriteConfig } from "../tauri/led";
+import { ledReadConfig, ledWriteConfig } from "../backends";
 import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
 import { useT } from "../i18n";
 import { LedCap } from "../caps/toraboCaps";

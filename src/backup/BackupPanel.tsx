@@ -9,10 +9,16 @@ import { call_rpc } from "../rpc/logging";
 import { StatusBadge, PanelStatus } from "../misc/PanelActionBar";
 import { useT } from "../i18n";
 
-import { trackballReadConfig, trackballWriteConfig } from "../tauri/trackball";
-import { trackpadReadConfig, trackpadWriteConfig } from "../tauri/trackpad";
-import { dmacReadAll, dmacWriteSlot } from "../tauri/dmac";
-import { comboReadAll, comboWriteSlot } from "../tauri/combo";
+import {
+  trackballReadConfig,
+  trackballWriteConfig,
+  trackpadReadConfig,
+  trackpadWriteConfig,
+  dmacReadAll,
+  dmacWriteSlot,
+  comboReadAll,
+  comboWriteSlot,
+} from "../backends";
 import {
   decodeDmac,
   encodeSlot as encodeMacroSlot,
@@ -24,11 +30,10 @@ import {
   CB_SLOTS,
 } from "../dynamic_combos/comboConfig";
 import {
-  pickOpenPath,
-  pickSavePath,
-  readTextFile,
-  writeTextFile,
-} from "../tauri/backup";
+  BACKUP_FILTERS,
+  openBackupFile,
+  saveTextFile,
+} from "../backends";
 import {
   BACKUP_FORMAT,
   BACKUP_VERSION,
@@ -384,12 +389,15 @@ export function BackupPanel() {
         behaviors,
       };
       const stamp = file.exportedAt.replace(/[:T]/g, "-").slice(0, 19);
-      const path = await pickSavePath(`torabo-backup-${stamp}.json`);
-      if (!path) {
+      const saved = await saveTextFile(
+        `torabo-backup-${stamp}.json`,
+        JSON.stringify(file, null, 2),
+        BACKUP_FILTERS
+      );
+      if (!saved) {
         setStatus({ kind: "idle" });
         return;
       }
-      await writeTextFile(path, JSON.stringify(file, null, 2));
       const parts = [
         trackball ? "トラックボール設定" : null,
         trackpad ? "トラックパッド設定" : null,
@@ -401,7 +409,10 @@ export function BackupPanel() {
         macros ? "マクロ" : null,
         combos ? "コンボ" : null,
       ].filter(Boolean);
-      setStatus({ kind: "ok", msg: `保存しました（${parts.join(" + ")}）: ${path}` });
+      setStatus({
+        kind: "ok",
+        msg: `保存しました（${parts.join(" + ")}）: ${saved.label}`,
+      });
     } catch (e) {
       setStatus({ kind: "error", msg: t("status.error") + String(e) });
     }
@@ -436,18 +447,17 @@ export function BackupPanel() {
       }));
 
       const text = generateKeymapDts(layers, behaviors);
-      const path = await pickSavePath("keymap.keymap");
-      if (!path) {
+      const saved = await saveTextFile("keymap.keymap", text, BACKUP_FILTERS);
+      if (!saved) {
         setStatus({ kind: "idle" });
         return;
       }
-      await writeTextFile(path, text);
 
       const fixmes = (text.match(/FIXME/g) || []).length;
       const warn = fixmes ? `（要確認 FIXME ${fixmes}件）` : "";
       setStatus({
         kind: fixmes ? "error" : "ok",
-        msg: `keymap.keymap を保存しました（${layers.length} レイヤー）${warn}: ${path}`,
+        msg: `keymap.keymap を保存しました（${layers.length} レイヤー）${warn}: ${saved.label}`,
       });
     } catch (e) {
       setStatus({ kind: "error", msg: t("status.error") + String(e) });
@@ -466,9 +476,9 @@ export function BackupPanel() {
       return;
     }
     try {
-      const path = await pickOpenPath();
-      if (!path) return;
-      const file = validateBackup(JSON.parse(await readTextFile(path)));
+      const picked = await openBackupFile();
+      if (!picked) return;
+      const file = validateBackup(JSON.parse(picked.text));
       if (!file.keymap?.layers?.length) {
         throw new Error("このファイルにはキーマップが入っていません。");
       }
@@ -528,21 +538,23 @@ export function BackupPanel() {
         version: Math.max(file.version, BACKUP_VERSION),
         behaviors: names,
       };
-      const base = path.replace(/\.json$/i, "");
-      const savePath = await pickSavePath(
-        `${base.split(/[\\/]/).pop()}-named.json`
+      // picked.name is already the bare file name on every backend.
+      const base = picked.name.replace(/\.json$/i, "");
+      const saved = await saveTextFile(
+        `${base}-named.json`,
+        JSON.stringify(out, null, 2),
+        BACKUP_FILTERS
       );
-      if (!savePath) {
+      if (!saved) {
         setStatus({ kind: "idle" });
         return;
       }
-      await writeTextFile(savePath, JSON.stringify(out, null, 2));
 
       const missed = used.filter((id) => !names[String(id)]);
       setStatus({
         kind: missed.length ? "error" : "ok",
         msg:
-          `ビヘイビア名を付与して保存しました（${Object.keys(names).length} 個のID）: ${savePath}` +
+          `ビヘイビア名を付与して保存しました（${Object.keys(names).length} 個のID）: ${saved.label}` +
           (missed.length ? `\n名前を取れなかったID: ${missed.join(", ")}` : "") +
           "\nこのファイルを、復元したいキーボードで「インポート」してください。",
       });
@@ -557,9 +569,9 @@ export function BackupPanel() {
       return;
     }
     try {
-      const path = await pickOpenPath();
-      if (!path) return;
-      const file = validateBackup(JSON.parse(await readTextFile(path)));
+      const picked = await openBackupFile();
+      if (!picked) return;
+      const file = validateBackup(JSON.parse(picked.text));
 
       const ok = window.confirm(
         "現在のキーボード設定を、このバックアップで上書きします。よろしいですか？"

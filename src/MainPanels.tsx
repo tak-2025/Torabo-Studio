@@ -1,3 +1,4 @@
+import { useContext } from "react";
 import { Tab, TabList, TabPanel, Tabs } from "react-aria-components";
 import {
   Keyboard as KeyboardIcon,
@@ -22,6 +23,8 @@ import TrackpadSettings from "./trackpad/TrackpadSettingsV2";
 import { EncoderSettings } from "./encoder/EncoderSettings";
 import { LedSettings } from "./led/LedSettings";
 import { useToraboCaps } from "./caps/useToraboCaps";
+import { hasConfigAccess } from "./backends";
+import { ConnectionContext } from "./rpc/ConnectionContext";
 import { Feature, hasFeature, ledSides } from "./caps/toraboCaps";
 import MacrosPanel from "./dynamic_macros/MacrosPanel";
 import CombosPanel from "./dynamic_combos/CombosPanel";
@@ -57,12 +60,48 @@ interface TabDef {
 
 const TABS: TabDef[] = [
   { id: "keyboard", labelKey: "tab.keymap", icon: KeyboardIcon, group: "edit" },
-  { id: "trackball", labelKey: "tab.trackball", icon: Mouse, group: "edit", feature: Feature.Trackball },
-  { id: "trackpad", labelKey: "tab.trackpad", icon: Touchpad, group: "edit", feature: Feature.Trackpad },
-  { id: "encoder", labelKey: "tab.encoder", icon: RotateCw, group: "edit", feature: Feature.Encoder },
-  { id: "led", labelKey: "tab.led", icon: Lightbulb, group: "edit", feature: Feature.Led },
-  { id: "macros", labelKey: "tab.macros", icon: Zap, group: "manage", feature: Feature.Macros },
-  { id: "combos", labelKey: "tab.combos", icon: Combine, group: "manage", feature: Feature.Combos },
+  {
+    id: "trackball",
+    labelKey: "tab.trackball",
+    icon: Mouse,
+    group: "edit",
+    feature: Feature.Trackball,
+  },
+  {
+    id: "trackpad",
+    labelKey: "tab.trackpad",
+    icon: Touchpad,
+    group: "edit",
+    feature: Feature.Trackpad,
+  },
+  {
+    id: "encoder",
+    labelKey: "tab.encoder",
+    icon: RotateCw,
+    group: "edit",
+    feature: Feature.Encoder,
+  },
+  {
+    id: "led",
+    labelKey: "tab.led",
+    icon: Lightbulb,
+    group: "edit",
+    feature: Feature.Led,
+  },
+  {
+    id: "macros",
+    labelKey: "tab.macros",
+    icon: Zap,
+    group: "manage",
+    feature: Feature.Macros,
+  },
+  {
+    id: "combos",
+    labelKey: "tab.combos",
+    icon: Combine,
+    group: "manage",
+    feature: Feature.Combos,
+  },
   { id: "backup", labelKey: "tab.backup", icon: Archive, group: "manage" },
 ];
 
@@ -109,7 +148,7 @@ export function MainPanels() {
   const [panel, setPanel] = useLocalStorageState<Panel>(
     "torabo.mainTab",
     DEFAULT_PANEL,
-    { deserialize: (v) => (isPanelId(v) ? (v as Panel) : DEFAULT_PANEL) }
+    { deserialize: (v) => (isPanelId(v) ? (v as Panel) : DEFAULT_PANEL) },
   );
 
   // What this particular firmware can do. null while loading, and for firmware
@@ -117,8 +156,18 @@ export function MainPanels() {
   // so we show everything rather than hide a tab we simply couldn't ask about.
   const { caps } = useToraboCaps();
 
+  // The config services are GATT-only, so a browser talking Web Serial has the
+  // keymap and nothing else — those tabs could only fail there, so they go away.
+  // Only once connected, though: before that every panel shows its own "connect
+  // first" note, and hiding them would take away the one hint of what this
+  // keyboard can do. The backup tab always stays — it degrades section by
+  // section and reports what it had to skip.
+  const { conn } = useContext(ConnectionContext);
+  const configReachable = !conn || hasConfigAccess();
+
   const visibleTabs = TABS.filter((tab) => {
     if (!tab.feature) return true;
+    if (!configReachable) return false;
     if (!hasFeature(caps, tab.feature)) return false;
     // The LED's anode rides the extender pad's power rail, so a build can have the
     // module compiled in while neither half actually has a working LED. The
@@ -133,7 +182,9 @@ export function MainPanels() {
 
   // The remembered tab may not exist on THIS keyboard (or the firmware changed
   // under us). Fall back rather than render a tab with no panel behind it.
-  const activePanel = visibleTabs.some((tb) => tb.id === panel) ? panel : DEFAULT_PANEL;
+  const activePanel = visibleTabs.some((tb) => tb.id === panel)
+    ? panel
+    : DEFAULT_PANEL;
 
   return (
     <Tabs
@@ -151,9 +202,7 @@ export function MainPanels() {
           // Divider before every group after the first; caption above the
           // first tab of each group (both skipped for the very first tab).
           const dividerClass =
-            i > 0 && groupStart
-              ? "ml-2 pl-3 border-l border-base-300"
-              : "";
+            i > 0 && groupStart ? "ml-2 pl-3 border-l border-base-300" : "";
           const group = GROUPS.find((g) => g.id === tab.group)!;
 
           return (

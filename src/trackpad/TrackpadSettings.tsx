@@ -2,7 +2,7 @@ import { Fragment, useCallback, useContext, useEffect, useState } from "react";
 
 import { ConnectionContext } from "../rpc/ConnectionContext";
 import { call_rpc } from "../rpc/logging";
-import { trackpadReadConfig, trackpadWriteConfig } from "../tauri/trackpad";
+import { trackpadReadConfig, trackpadWriteConfig } from "../backends";
 import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
 import { useT } from "../i18n";
 import {
