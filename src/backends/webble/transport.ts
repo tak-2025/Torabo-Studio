@@ -26,19 +26,78 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export async function connect(): Promise<RpcTransport> {
-  if (!navigator.bluetooth) {
-    throw new Error(
-      "このブラウザは Web Bluetooth に対応していません（Chrome か Edge をご利用ください）。",
-    );
-  }
+export interface ConnectOptions {
+  /**
+   * List every device instead of just keyboards, for one the filter misses.
+   * Implies opening the chooser.
+   */
+  allDevices?: boolean;
+}
 
-  // acceptAllDevices, not a service filter: the chooser can only match what the
-  // keyboard puts in its advertisement, and filtering on a service it does not
-  // advertise shows an empty picker with no way to tell why. Torabo-Float-Web
-  // reaches this same keyboard the same way.
-  const device = await navigator.bluetooth
-    .requestDevice({ acceptAllDevices: true, optionalServices: ALL_SERVICES })
+/**
+ * What the chooser lists.
+ *
+ * Filters match live advertisement data only, which is why they were no use
+ * while the keyboard sat connected to the PC: a connected ZMK keyboard
+ * advertises nothing, so nothing matched it. The documented procedure makes it
+ * discoverable on purpose (switch profiles), and at that moment its
+ * advertisement does carry these — so the filter earns its keep instead of
+ * showing every radio in the building.
+ *
+ * Matching what ZMK actually broadcasts (app/src/ble.c):
+ *  - battery service, in every ZMK advertisement. HID (0x1812) would be the
+ *    tighter match but Web Bluetooth blocklists it, so it cannot be filtered on.
+ *  - the name, which ZMK forces into the advertisement. Covers "torabo-tsuki"
+ *    and the split's "L-torabo-tsuki".
+ *  - the Studio service, in case a future firmware advertises it. Today's
+ *    does not, which is why filtering on it alone — as upstream does — finds
+ *    nothing here.
+ *
+ * Filters are OR'd. `allDevices` remains for anything this misses.
+ */
+const BATTERY_SERVICE = 0x180f;
+
+const KEYBOARD_FILTERS: BluetoothLEScanFilter[] = [
+  { services: [BATTERY_SERVICE] },
+  { namePrefix: "torabo" },
+  { services: [RPC_SERVICE] },
+];
+
+/**
+ * How long to wait on the remembered keyboard before falling back to the
+ * chooser. Kept short on purpose: opening the chooser needs the click's user
+ * activation, which expires a few seconds after the click, so a long wait here
+ * would spend the very permission the fallback depends on.
+ */
+const REMEMBERED_CONNECT_TIMEOUT_MS = 3000;
+
+/**
+ * Devices this origin has already been granted, newest grant last.
+ *
+ * This is what makes a second connection painless: the chooser never opens
+ * again. It is also the only way to reach a keyboard that is already connected
+ * to the OS: connected means not advertising, and the chooser only lists what
+ * advertises. Permission is per-origin, so a keyboard granted on localhost
+ * still needs granting once on the published site.
+ */
+async function rememberedDevices(): Promise<BluetoothDevice[]> {
+  if (!navigator.bluetooth.getDevices) return [];
+  try {
+    return await navigator.bluetooth.getDevices();
+  } catch (e) {
+    console.warn("getDevices unavailable:", e);
+    return [];
+  }
+}
+
+/** Ask the user to pick a device. */
+async function requestDevice(allDevices: boolean): Promise<BluetoothDevice> {
+  return navigator.bluetooth
+    .requestDevice(
+      allDevices
+        ? { acceptAllDevices: true, optionalServices: ALL_SERVICES }
+        : { filters: KEYBOARD_FILTERS, optionalServices: ALL_SERVICES },
+    )
     .catch((e) => {
       if (e instanceof DOMException && e.name === "NotFoundError") {
         throw new UserCancelledError("User cancelled the connection attempt", {
@@ -47,11 +106,69 @@ export async function connect(): Promise<RpcTransport> {
       }
       throw e;
     });
+}
 
+export async function connect(
+  options: ConnectOptions = {},
+): Promise<RpcTransport> {
+  if (!navigator.bluetooth) {
+    throw new Error(
+      "このブラウザは Web Bluetooth に対応していません（Chrome か Edge をご利用ください）。",
+    );
+  }
+
+  if (!options.allDevices) {
+    // Only the most recent grant, and only one attempt: that is the keyboard
+    // they last used, and anything longer eats the activation the chooser needs.
+    const last = (await rememberedDevices()).at(-1);
+    if (last) {
+      try {
+        return await attach(last, REMEMBERED_CONNECT_TIMEOUT_MS);
+      } catch (e) {
+        // Switched off, out of range, or paired to something else now. Fall
+        // through and let them pick.
+        console.warn(`remembered device ${last.name} unreachable:`, e);
+        last.gatt?.disconnect();
+      }
+    }
+  }
+
+  try {
+    return await attach(await requestDevice(options.allDevices === true));
+  } catch (e) {
+    // The activation from the click can lapse while a remembered keyboard is
+    // timing out, and the chooser then refuses to open. Nothing is wrong except
+    // the timing, so say so instead of showing a SecurityError.
+    if (e instanceof DOMException && e.name === "SecurityError") {
+      throw new Error(
+        "前回のキーボードに届かなかったため、選択画面を開けませんでした。" +
+          "もう一度「Bluetooth」を押してください。",
+      );
+    }
+    throw e;
+  }
+}
+
+async function attach(
+  device: BluetoothDevice,
+  timeoutMs?: number,
+): Promise<RpcTransport> {
   if (!device.gatt) throw new Error("GATT を利用できないデバイスです。");
 
   const label = device.name || "Unknown";
-  const server = await device.gatt.connect();
+  const gatt = device.gatt;
+  const server = await (timeoutMs
+    ? Promise.race([
+        gatt.connect(),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(new Error(`接続がタイムアウトしました（${timeoutMs}ms）`)),
+            timeoutMs,
+          ),
+        ),
+      ])
+    : gatt.connect());
 
   let rpc: BluetoothRemoteGATTCharacteristic;
   try {

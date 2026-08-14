@@ -31,6 +31,15 @@ import { AppFooter } from "./AppFooter";
 import { AboutModal } from "./AboutModal";
 import { LicenseNoticeModal } from "./misc/LicenseNoticeModal";
 
+/**
+ * Whether the browser can reconnect to an already-granted keyboard without the
+ * chooser. Edge 151 and Chromium cannot; without it there is no way to reach a
+ * keyboard that is connected to this PC, because it stops advertising and the
+ * chooser only ever lists what is advertising.
+ */
+const canReconnectSilently =
+  typeof navigator.bluetooth?.getDevices === "function";
+
 const TRANSPORTS: TransportFactory[] = [
   navigator.serial && {
     label: "USB",
@@ -50,8 +59,30 @@ const TRANSPORTS: TransportFactory[] = [
         {
           label: "Bluetooth",
           isWireless: true,
-          noteKey: "connect.note.webBluetooth",
-          connect: webble_connect,
+          // Reconnects silently where the browser can do that; otherwise opens
+          // a chooser listing keyboards rather than every radio in range.
+          noteKey: canReconnectSilently
+            ? "connect.note.webBluetooth"
+            : "connect.note.webBluetoothChoose",
+          // A keyboard already connected to this PC cannot be in the list at
+          // all. Getting it there is fiddly, and easy to get stuck halfway
+          // through, so the procedure is spelled out rather than hinted at.
+          stepKeys: [
+            "connect.steps.open",
+            "connect.steps.switch",
+            "connect.steps.switchBack",
+            "connect.steps.select",
+          ],
+          connect: () => webble_connect(),
+        },
+        // The filter only matches a keyboard that is discoverable at that
+        // moment, and only on what ZMK happens to broadcast. Neither is
+        // guaranteed, so there is always a way to see everything.
+        {
+          label: "Bluetooth（すべての機器）",
+          isWireless: true,
+          noteKey: "connect.note.webBluetoothAll",
+          connect: () => webble_connect({ allDevices: true }),
         },
       ]
     : []),

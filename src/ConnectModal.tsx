@@ -23,6 +23,12 @@ export type TransportFactory = {
    * scope, where hooks (and so the translator) are not available.
    */
   noteKey?: string;
+  /**
+   * i18n keys for a numbered procedure shown below the buttons, for a transport
+   * that needs one. Too long to sit under a button, and too easy to get stuck
+   * in to leave out.
+   */
+  stepKeys?: string[];
   connect?: () => Promise<RpcTransport>;
   pick_and_connect?: {
     list: () => Promise<Array<AvailableDevice>>;
@@ -215,10 +221,22 @@ function simpleDevicePicker(
       )}
     </li>
   ));
+  const steps = transports.find((t) => t.stepKeys?.length)?.stepKeys;
+
   return (
     <div>
       <p className="text-sm">{tr("connect.selectType")}</p>
       <ul className="flex gap-3 pt-2 items-start">{connections}</ul>
+      {steps && (
+        <div className="mt-3 rounded border border-base-300 bg-base-200/50 p-2.5">
+          <p className="text-xs font-semibold">{tr("connect.steps.title")}</p>
+          <ol className="mt-1 list-decimal list-inside text-xs text-base-content/70 leading-relaxed">
+            {steps.map((key) => (
+              <li key={key}>{tr(key)}</li>
+            ))}
+          </ol>
+        </div>
+      )}
       {selectedTransport && availableDevices && (
         <ul>
           {availableDevices.map((d) => (
