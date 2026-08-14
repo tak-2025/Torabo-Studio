@@ -31,9 +31,10 @@ jobs:
 
       - run: npm ci
 
-      - name: Type check
-        run: npx tsc --noEmit
-
+      # No separate type-check step: `npm run build` is
+      # `generate-data && tsc && vite build`, and tsc has to run AFTER
+      # generate-data — src/data/release-data.json is generated, not committed,
+      # so type-checking first fails on a missing module.
       - name: Build
         # Project site => served from /<repo>/, so assets need that prefix.
         run: npm run build

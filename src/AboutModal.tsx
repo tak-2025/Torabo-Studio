@@ -184,16 +184,20 @@ export const AboutModal = ({ open, onClose }: AboutModalProps) => {
     <GenericModal ref={ref} className="min-w-min w-[70vw]" onClose={onClose}>
       <p className="py-1 mr-2 text-sm opacity-80">{t("about.intro")}</p>
       <div className="flex justify-between items-start">
+        {/* Issues go to this fork, not upstream: a problem with these panels is
+            not ZMK's to answer, and reporting it there wastes everyone's time.
+            The ZMK Project keeps its website link — this is built on their work
+            and that is where the firmware itself is documented. Their Discord is
+            deliberately not linked: it is a community for the ZMK project, and
+            sending an unofficial fork's users into it is not our call to make. */}
         <p>
-          The ZMK Project:{" "}
-          <ExternalLink href="https://zmk.dev/">website</ExternalLink>,{" "}
-          <ExternalLink href="https://github.com/zmkfirmware/zmk/issues/">
+          Torabo Studio:{" "}
+          <ExternalLink href="https://github.com/tak-2025/Torabo-Studio/issues">
             GitHub Issues
           </ExternalLink>
-          ,{" "}
-          <ExternalLink href="https://zmk.dev/community/discord/invite">
-            Discord Server
-          </ExternalLink>
+          <br />
+          The ZMK Project:{" "}
+          <ExternalLink href="https://zmk.dev/">website</ExternalLink>
         </p>
         <button
           type="button"
