@@ -78,6 +78,50 @@ function scalePosition(
   };
 }
 
+/**
+ * Bounding box of the keys once rotation is applied, in layout units.
+ *
+ * A rotated key sweeps outside the rectangle its x/y/width/height describe, so
+ * the four corners have to be rotated about the key's own origin before being
+ * folded into the extents. Origins can also be negative, hence min as well as
+ * max: the caller shifts everything so the drawn area starts at 0,0.
+ */
+function layoutExtents(positions: Array<KeyPosition>) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const p of positions) {
+    const rad = ((p.r || 0) * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    // scalePosition rotates about (rx, ry), defaulting to the key's own corner.
+    const ox = p.rx ?? p.x;
+    const oy = p.ry ?? p.y;
+
+    for (const [cx, cy] of [
+      [p.x, p.y],
+      [p.x + p.width, p.y],
+      [p.x, p.y + p.height],
+      [p.x + p.width, p.y + p.height],
+    ]) {
+      const dx = cx - ox;
+      const dy = cy - oy;
+      const x = ox + dx * cos - dy * sin;
+      const y = oy + dx * sin + dy * cos;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  // No keys: a zero-sized box, rather than Infinity in a style attribute.
+  if (!positions.length) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  return { minX, minY, maxX, maxY };
+}
+
 export const PhysicalLayout = ({
   positions,
   selectedPosition,
@@ -130,16 +174,31 @@ export const PhysicalLayout = ({
     };
   }, [props.zoom]);
 
-  // TODO: Add a bit of padding for rotation when supported
-  let rightMost = positions
-    .map((k) => k.x + k.width)
-    .reduce((a, b) => Math.max(a, b), 0);
-  let bottomMost = positions
-    .map((k) => k.y + k.height)
-    .reduce((a, b) => Math.max(a, b), 0);
+  // Extents of what is actually drawn, rotation included. Taking the corners
+  // unrotated — as this did — leaves a thumb cluster hanging outside the box:
+  // the box is centred, the keys are not, and at a high zoom the bottom row can
+  // be clipped by a parent that hides overflow. For a board with no rotation
+  // this comes out identical to the old two lines.
+  const { minX, minY, maxX, maxY } = layoutExtents(positions);
+  const rightMost = maxX - minX;
+  const bottomMost = maxY - minY;
 
   const positionItems = positions.map((p, idx) => (
-    <div className="absolute" style={scalePosition(p, oneU)}>
+    // Shift so the top-left of the drawn area sits at the box origin. rx/ry move
+    // with x/y, which leaves the rotation origin where it was relative to the key.
+    <div
+      className="absolute"
+      style={scalePosition(
+        {
+          ...p,
+          x: p.x - minX,
+          y: p.y - minY,
+          rx: p.rx === undefined ? undefined : p.rx - minX,
+          ry: p.ry === undefined ? undefined : p.ry - minY,
+        },
+        oneU,
+      )}
+    >
       <div
         key={p.id}
         onClick={() => onPositionClicked?.(idx)}

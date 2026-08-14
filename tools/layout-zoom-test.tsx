@@ -51,13 +51,42 @@ function Case({ w, h, label }: { w: number; h: number; label: string }) {
       const el = parent?.firstElementChild as HTMLElement | null;
       if (!parent || !el) return;
       const scale = new DOMMatrix(getComputedStyle(el).transform).a;
-      const drawn = { w: el.clientWidth * scale, h: el.clientHeight * scale };
+
+      // Where the keys actually land on screen, not where the box says they
+      // should: rotated thumb keys stick out past the declared height, which
+      // is exactly the kind of thing that makes a board look off-centre.
+      const box = parent.getBoundingClientRect();
+      let top = Infinity;
+      let bottom = -Infinity;
+      let left = Infinity;
+      let right = -Infinity;
+      el.querySelectorAll("*").forEach((n) => {
+        const r = (n as HTMLElement).getBoundingClientRect();
+        if (!r.width && !r.height) return;
+        top = Math.min(top, r.top);
+        bottom = Math.max(bottom, r.bottom);
+        left = Math.min(left, r.left);
+        right = Math.max(right, r.right);
+      });
+
+      const gapTop = top - box.top;
+      const gapBottom = box.bottom - bottom;
+      const gapLeft = left - box.left;
+      const gapRight = box.right - right;
+      // Key draws itself oneU-2 px so keys don't touch, which leaves ~2px of
+      // slack on the right and bottom edges. That is the gap between keys, not
+      // a centring error, so the tolerance has to clear it.
+      const centred =
+        Math.abs(gapTop - gapBottom) <= 4 && Math.abs(gapLeft - gapRight) <= 4;
+
       setInfo(
         `枠 ${parent.clientWidth}x${parent.clientHeight} / ` +
-          `盤面 ${el.clientWidth}x${el.clientHeight} → ` +
-          `scale ${scale.toFixed(2)} → 実表示 ${drawn.w.toFixed(0)}x${drawn.h.toFixed(0)} ` +
-          `（枠に対し 幅 ${((drawn.w / parent.clientWidth) * 100).toFixed(0)}% / ` +
-          `高さ ${((drawn.h / parent.clientHeight) * 100).toFixed(0)}%）`,
+          `箱 ${el.clientWidth}x${el.clientHeight} → scale ${scale.toFixed(2)} / ` +
+          `実描画 ${(right - left).toFixed(0)}x${(bottom - top).toFixed(0)} ` +
+          `（高さ ${(((bottom - top) / box.height) * 100).toFixed(0)}%）` +
+          ` | 余白 上${gapTop.toFixed(0)} 下${gapBottom.toFixed(0)} ` +
+          `左${gapLeft.toFixed(0)} 右${gapRight.toFixed(0)} → ` +
+          (centred ? "中央" : "⚠ 中央でない"),
       );
     }, 150);
     return () => clearTimeout(t);
