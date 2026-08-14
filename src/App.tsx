@@ -53,14 +53,14 @@ const TRANSPORTS: TransportFactory[] = [
           noteKey: "connect.note.webBluetooth",
           connect: () => webble_connect(),
         },
-        // The filtered chooser can only list a device that is advertising right
-        // now, so it can miss a keyboard that is connected or renamed. This is
-        // the way out of that, rather than a dead end with nothing to click.
+        // Once a keyboard has been granted, the plain button reconnects to it
+        // with no chooser at all. This is how you get back to the chooser to
+        // pick a different one.
         {
-          label: "Bluetooth（すべての機器）",
+          label: "Bluetooth（別の機器を選ぶ）",
           isWireless: true,
-          noteKey: "connect.note.webBluetoothAll",
-          connect: () => webble_connect({ allDevices: true }),
+          noteKey: "connect.note.webBluetoothChoose",
+          connect: () => webble_connect({ chooseDevice: true }),
         },
       ]
     : []),

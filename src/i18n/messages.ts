@@ -73,9 +73,9 @@ const ja: Dict = {
   "connect.note.webSerial":
     "キーマップのみ。トラックボール等の設定は Bluetooth 接続が必要です。",
   "connect.note.webBluetooth":
-    "全機能。キーボードだけを一覧に出します。事前に OS 側でペアリングしておいてください。",
-  "connect.note.webBluetoothAll":
-    "上の一覧に出てこないとき用。周囲の Bluetooth 機器を全部表示します。",
+    "全機能。一度選べば、次回からは選択なしで前回のキーボードにつながります。",
+  "connect.note.webBluetoothChoose":
+    "初回、またはキーボードを変えるとき。一覧から選びます。",
   "connect.toUse": "Torabo Studio を使うには、次のいずれかを行ってください:",
   "connect.useBrowser":
     "上記のウェブ技術に対応したブラウザ（Chrome / Edge など）を使う、または",
@@ -203,9 +203,9 @@ const en: Dict = {
   "connect.note.webSerial":
     "Keymap only. Trackball and other settings need a Bluetooth connection.",
   "connect.note.webBluetooth":
-    "Everything. Lists keyboards only. Pair with your OS first.",
-  "connect.note.webBluetoothAll":
-    "For when the keyboard is not in that list: shows every nearby device.",
+    "Everything. After the first time, reconnects without asking again.",
+  "connect.note.webBluetoothChoose":
+    "First time, or to switch keyboards: pick from a list.",
   "connect.toUse": "To use Torabo Studio, either:",
   "connect.useBrowser":
     "Use a browser that supports the above web technologies, e.g. Chrome/Edge, or",
