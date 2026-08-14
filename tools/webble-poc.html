@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Torabo Studio — Web Bluetooth PoC (Phase 0)</title>
+<!--
+  PLAN-studio-web.md Phase 0 の実機確認用。依存なしの単一ファイルなので、
+  ダブルクリックで開いて（file:// で可）そのまま実行できる。
+
+  確認したいこと:
+    1. ブラウザから暗号化された独自 GATT 特性を READ できるか
+    2. 同じく WRITE できるか（同一バイトを書き戻す往復テスト。設定は変わらない）
+    3. **マクロ (1624B) と トラックパッド が 512B で切られないか**  ← 最重要
+       ATT の属性値上限は 512B。デスクトップ版は OS の BLE スタックが
+       offset 付き read を繰り返して読めているが、ブラウザが同じことを
+       する保証がない。ここで切られたら FW にページングを足す必要がある。
+
+  使い方: 「接続」→ 結果を確認 →（任意で）「書き込みテスト」→「結果をコピー」
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", "Yu Gothic UI", sans-serif;
+    margin: 0; padding: 1.5rem; line-height: 1.6;
+    max-width: 60rem; margin-inline: auto;
+  }
+  h1 { font-size: 1.3rem; margin: 0 0 .25rem; }
+  .sub { opacity: .7; font-size: .9rem; margin: 0 0 1.25rem; }
+  .bar { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  button {
+    font: inherit; padding: .5rem 1rem; border-radius: .5rem;
+    border: 1px solid currentColor; background: transparent; cursor: pointer;
+  }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+  .note {
+    border-left: 3px solid #f59e0b; padding: .5rem .75rem; margin: 1rem 0;
+    background: color-mix(in srgb, #f59e0b 12%, transparent); font-size: .9rem;
+  }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .9rem; }
+  th, td { border: 1px solid currentColor; padding: .35rem .5rem; text-align: left; }
+  th { background: color-mix(in srgb, currentColor 10%, transparent); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .ok { color: #16a34a; font-weight: 600; }
+  .ng { color: #dc2626; font-weight: 600; }
+  .warn { color: #d97706; font-weight: 600; }
+  .skip { opacity: .55; }
+  pre {
+    background: color-mix(in srgb, currentColor 8%, transparent);
+    padding: .75rem; border-radius: .5rem; overflow-x: auto;
+    font-size: .8rem; white-space: pre-wrap; word-break: break-all;
+  }
+</style>
+</head>
+<body>
+
+<h1>Torabo Studio — Web Bluetooth PoC</h1>
+<p class="sub">PLAN-studio-web.md Phase 0 / 独自 GATT サービスがブラウザから読み書きできるかの実機確認</p>
+
+<div class="note">
+  <strong>事前準備:</strong> Windows の設定でキーボードとペアリング済みであること。
+  Chrome は自前でペアリングを開始できないため、既存のボンドに乗る形になります。<br />
+  <strong>デスクトップ版 Torabo Studio は閉じてください</strong>（BLE 接続スロットの競合を避けるため）。
+</div>
+
+<div class="bar">
+  <button id="connect" class="primary">接続して読み取りテスト</button>
+  <button id="write" disabled>書き込みテスト（トラックボール往復）</button>
+  <button id="copy" disabled>結果をコピー</button>
+  <button id="disconnect" disabled>切断</button>
+</div>
+
+<div id="unsupported" class="note" hidden>
+  <strong>このブラウザは Web Bluetooth に対応していません。</strong>
+  Chrome または Edge で開いてください（Safari / Firefox は非対応）。
+</div>
+
+<table id="results" hidden>
+  <thead>
+    <tr><th>機能</th><th>Service</th><th class="num">読み取り</th><th class="num">期待</th><th>判定</th><th class="num">所要</th></tr>
+  </thead>
+  <tbody id="rows"></tbody>
+</table>
+
+<h2 style="font-size:1rem">ログ</h2>
+<pre id="log">（未実行）</pre>
+
+<script>
+"use strict";
+
+// --- 対象 UUID（src-tauri/src/transport/*.rs と完全一致） ----------------------
+
+const RPC_SERVICE = "00000000-0196-6107-c967-c5cfb1c2482a";
+const RPC_CHAR    = "00000001-0196-6107-c967-c5cfb1c2482a";
+
+/**
+ * expected: 定数で決まるものだけ入れる。トラックボール/トラックパッド/エンコーダ/LED の
+ * wire 長は ZMK_KEYMAP_LAYERS_LEN 依存でビルドごとに変わるので実測値を見るだけにする。
+ */
+const TARGETS = [
+  { key: "caps",      label: "caps",         svc: "e1f4a000-1c2d-4b6e-9f3a-0a1b2c3d4e5f", chr: "e1f4a001-1c2d-4b6e-9f3a-0a1b2c3d4e5f", expected: null },
+  { key: "trackball", label: "トラックボール", svc: "e1f4a900-1c2d-4b6e-9f3a-0a1b2c3d4e5f", chr: "e1f4a901-1c2d-4b6e-9f3a-0a1b2c3d4e5f", expected: null },
+  { key: "macros",    label: "マクロ",        svc: "e1f4aa00-1c2d-4b6e-9f3a-0a1b2c3d4e5f", chr: "e1f4aa01-1c2d-4b6e-9f3a-0a1b2c3d4e5f", expected: 1624 },
+  { key: "combos",    label: "コンボ",        svc: "e1f4ab00-1c2d-4b6e-9f3a-0a1b2c3d4e5f", chr: "e1f4ab01-1c2d-4b6e-9f3a-0a1b2c3d4e5f", expected: 420 },
+  { key: "trackpad",  label: "トラックパッド", svc: "e1f4ac00-1c2d-4b6e-9f3a-0a1b2c3d4e5f", chr: "e1f4ac01-1c2d-4b6e-9f3a-0a1b2c3d4e5f", expected: null },
+  { key: "encoder",   label: "エンコーダ",     svc: "e1f4ad00-1c2d-4b6e-9f3a-0a1b2c3d4e5f", chr: "e1f4ad01-1c2d-4b6e-9f3a-0a1b2c3d4e5f", expected: null },
+  { key: "led",       label: "LED",          svc: "e1f4ae00-1c2d-4b6e-9f3a-0a1b2c3d4e5f", chr: "e1f4ae01-1c2d-4b6e-9f3a-0a1b2c3d4e5f", expected: null },
+];
+
+const ALL_SERVICES = [RPC_SERVICE, ...TARGETS.map((t) => t.svc)];
+
+// --- ログ --------------------------------------------------------------------
+
+const logEl = document.getElementById("log");
+const lines = [];
+function log(msg) {
+  const t = new Date().toISOString().slice(11, 23);
+  lines.push(`[${t}] ${msg}`);
+  logEl.textContent = lines.join("\n");
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function hex(dv, max = 16) {
+  const n = Math.min(dv.byteLength, max);
+  const parts = [];
+  for (let i = 0; i < n; i++) parts.push(dv.getUint8(i).toString(16).padStart(2, "0"));
+  return parts.join(" ") + (dv.byteLength > max ? " …" : "");
+}
+
+// --- caps デコード（src/caps/toraboCaps.ts の要点だけ） -----------------------
+
+const FEATURE_NAMES = {
+  1: "Trackball", 2: "Macros", 3: "Combos", 4: "Trackpad",
+  5: "Encoder", 6: "Led", 7: "ReservedLayers",
+};
+
+function decodeCaps(dv) {
+  if (dv.byteLength < 8) return `短すぎます (${dv.byteLength}B)`;
+  const magic = dv.getUint16(0, true);
+  if (magic !== 0x4354) return `magic 不一致 (0x${magic.toString(16)}, 期待 0x4354 "TC")`;
+  const descVer = dv.getUint8(2);
+  const fw = `${dv.getUint8(3)}.${dv.getUint8(4)}.${dv.getUint8(5)}`;
+  const count = dv.getUint8(6);
+  const feats = [];
+  for (let i = 0; i < count; i++) {
+    const off = 8 + i * 4;
+    if (off + 4 > dv.byteLength) { feats.push("(切り詰められています)"); break; }
+    const id = dv.getUint8(off);
+    feats.push(`${FEATURE_NAMES[id] ?? `id=${id}`}(wire=${dv.getUint8(off + 1)},caps=0x${dv.getUint16(off + 2, true).toString(16)})`);
+  }
+  return `descVer=${descVer} FW=${fw} features(${count}): ${feats.join(", ")}`;
+}
+
+// --- 接続状態 ----------------------------------------------------------------
+
+let device = null;
+let server = null;
+/** key -> characteristic（書き込みテストで再利用する） */
+const chars = new Map();
+
+const btnConnect = document.getElementById("connect");
+const btnWrite = document.getElementById("write");
+const btnCopy = document.getElementById("copy");
+const btnDisconnect = document.getElementById("disconnect");
+const table = document.getElementById("results");
+const rows = document.getElementById("rows");
+
+function addRow(t, readLen, verdict, cls, ms) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>${t.label}</td>
+    <td><code>${t.svc.slice(0, 8)}</code></td>
+    <td class="num">${readLen === null ? "—" : readLen + " B"}</td>
+    <td class="num">${t.expected === null ? "可変" : t.expected + " B"}</td>
+    <td class="${cls}">${verdict}</td>
+    <td class="num">${ms === null ? "—" : ms + " ms"}</td>`;
+  rows.appendChild(tr);
+}
+
+async function run() {
+  btnConnect.disabled = true;
+  rows.innerHTML = "";
+  chars.clear();
+  lines.length = 0;
+
+  try {
+    log("requestDevice() — チューザーからキーボードを選んでください");
+    device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: ALL_SERVICES,
+    });
+    log(`選択: ${device.name ?? "(名前なし)"} / id=${device.id}`);
+
+    device.addEventListener("gattserverdisconnected", () => {
+      log("!! GATT 切断されました");
+      btnWrite.disabled = true;
+      btnDisconnect.disabled = true;
+      btnConnect.disabled = false;
+    });
+
+    const t0 = performance.now();
+    server = await device.gatt.connect();
+    log(`GATT 接続 OK (${Math.round(performance.now() - t0)} ms)`);
+
+    table.hidden = false;
+    btnDisconnect.disabled = false;
+
+    // --- RPC 特性の有無（キーマップ編集が成立するかの確認） ---
+    try {
+      const tr0 = performance.now();
+      const svc = await server.getPrimaryService(RPC_SERVICE);
+      const chr = await svc.getCharacteristic(RPC_CHAR);
+      chars.set("rpc", chr);
+      addRow({ label: "ZMK Studio RPC", svc: RPC_SERVICE, expected: null },
+             null, "特性あり", "ok", Math.round(performance.now() - tr0));
+      log("RPC 特性 OK（キーマップ編集の経路は成立）");
+    } catch (e) {
+      addRow({ label: "ZMK Studio RPC", svc: RPC_SERVICE, expected: null },
+             null, "失敗", "ng", null);
+      log(`RPC 特性 NG: ${e.message ?? e}`);
+    }
+
+    // --- 独自サービス 7 種 ---
+    for (const t of TARGETS) {
+      const ts = performance.now();
+      let chr;
+      try {
+        const svc = await server.getPrimaryService(t.svc);
+        chr = await svc.getCharacteristic(t.chr);
+        chars.set(t.key, chr);
+      } catch (e) {
+        // サービスが無いのは異常とは限らない（その機能を積んでいないビルド）
+        addRow(t, null, "サービス無し", "skip", null);
+        log(`${t.label}: サービス/特性が見つかりません — ${e.message ?? e}`);
+        continue;
+      }
+
+      try {
+        const dv = await chr.readValue();
+        const ms = Math.round(performance.now() - ts);
+        const len = dv.byteLength;
+
+        let verdict = "OK", cls = "ok";
+        if (len === 512) {
+          verdict = "512B で切断の疑い";
+          cls = "ng";
+        } else if (t.expected !== null && len !== t.expected) {
+          verdict = `期待と不一致`;
+          cls = "warn";
+        }
+        addRow(t, len, verdict, cls, ms);
+        log(`${t.label}: read ${len}B (${ms} ms) — ${hex(dv)}`);
+
+        if (t.key === "caps") log(`  caps 解釈 → ${decodeCaps(dv)}`);
+        if (len === 512) {
+          log(`  !! ちょうど 512B。ATT の属性値上限で切られた可能性が高い。`);
+          log(`  !! → PLAN-studio-web.md Phase 4（FW 側ページング）が必要。`);
+        }
+      } catch (e) {
+        addRow(t, null, "read 失敗", "ng", Math.round(performance.now() - ts));
+        log(`${t.label}: read 失敗 — ${e.message ?? e}`);
+      }
+    }
+
+    if (chars.has("trackball")) btnWrite.disabled = false;
+    btnCopy.disabled = false;
+    log("読み取りテスト完了。");
+  } catch (e) {
+    log(`中断: ${e.message ?? e}`);
+    btnCopy.disabled = false;
+  } finally {
+    btnConnect.disabled = false;
+  }
+}
+
+/**
+ * 書き込みの往復テスト。読んだ内容をそのまま書き戻すので設定は変化しない。
+ * 確認したいのは「暗号化された特性に write できるか」の一点。
+ */
+async function writeTest() {
+  btnWrite.disabled = true;
+  try {
+    const chr = chars.get("trackball");
+    log("--- 書き込みテスト（トラックボール） ---");
+
+    const before = await chr.readValue();
+    log(`書き込み前: ${before.byteLength}B — ${hex(before)}`);
+
+    const t0 = performance.now();
+    await chr.writeValue(before.buffer);
+    log(`同一バイトを書き戻し OK (${Math.round(performance.now() - t0)} ms)`);
+
+    const after = await chr.readValue();
+    const same =
+      after.byteLength === before.byteLength &&
+      new Uint8Array(after.buffer).every((b, i) => b === new Uint8Array(before.buffer)[i]);
+    log(`書き込み後: ${after.byteLength}B — ${hex(after)}`);
+    log(same ? "往復一致 — 書き込み経路 OK" : "!! 往復不一致。要調査");
+  } catch (e) {
+    log(`書き込みテスト失敗: ${e.message ?? e}`);
+    log("  （write が拒否される場合、Chrome が暗号化書き込みを通していない可能性）");
+  } finally {
+    btnWrite.disabled = false;
+  }
+}
+
+btnConnect.addEventListener("click", run);
+btnWrite.addEventListener("click", writeTest);
+btnDisconnect.addEventListener("click", () => {
+  if (device?.gatt?.connected) device.gatt.disconnect();
+});
+btnCopy.addEventListener("click", async () => {
+  const summary = [...rows.querySelectorAll("tr")]
+    .map((tr) => [...tr.children].map((td) => td.textContent.trim()).join(" | "))
+    .join("\n");
+  const text = `## 結果\n${summary}\n\n## ログ\n${lines.join("\n")}\n\n## 環境\n${navigator.userAgent}`;
+  try {
+    await navigator.clipboard.writeText(text);
+    btnCopy.textContent = "コピーしました";
+    setTimeout(() => (btnCopy.textContent = "結果をコピー"), 2000);
+  } catch {
+    // file:// では clipboard API が使えないことがある。手動コピー用に出す。
+    logEl.textContent = text;
+  }
+});
+
+if (!navigator.bluetooth) {
+  document.getElementById("unsupported").hidden = false;
+  btnConnect.disabled = true;
+}
+</script>
+</body>
+</html>
