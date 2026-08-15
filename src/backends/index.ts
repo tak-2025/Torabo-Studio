@@ -34,6 +34,18 @@ export function registerBackend(backend: ToraboBackend | null): void {
   registered = backend;
 }
 
+/**
+ * Retire a backend when its connection ends.
+ *
+ * Only clears if this one is still the active backend. A teardown can fire late
+ * — a disconnect event arriving after the user has already connected again —
+ * and an unconditional clear would take the new connection's backend down with
+ * the old one, leaving the panels with nothing to talk to.
+ */
+export function unregisterBackend(backend: ToraboBackend): void {
+  if (registered === backend) registered = null;
+}
+
 export function activeBackend(): ToraboBackend {
   if (registered) return registered;
   if (isTauri()) return tauriBackend;

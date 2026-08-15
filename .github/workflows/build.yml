@@ -64,15 +64,8 @@ jobs:
         with:
           args: ${{ matrix.args }}
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: torabo-studio-${{ matrix.platform }}-${{ strategy.job-index }}
-          path: |
-            src-tauri/target/**/release/bundle/**/*.dmg
-            src-tauri/target/**/release/bundle/**/*.app
-            src-tauri/target/**/release/bundle/**/*.msi
-            src-tauri/target/**/release/bundle/**/*.exe
-            src-tauri/target/**/release/bundle/**/*.AppImage
-            src-tauri/target/**/release/bundle/**/*.deb
-          if-no-files-found: warn
+      # No artifact upload: on a public repository anyone who can see a run can
+      # download its artifacts, and desktop builds are deliberately not
+      # distributed from here (people fork and build their own). This workflow
+      # stays as a check that the desktop app still compiles on all three
+      # platforms.

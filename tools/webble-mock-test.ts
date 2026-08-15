@@ -10,6 +10,7 @@
  * This is a dev tool: it is not part of any build input and ships nowhere.
  */
 
+import { connect } from "../src/backends/webble/transport";
 import { makeConfigBackend } from "../src/backends/webble/config";
 import { CONFIG_SERVICES } from "../src/backends/webble/uuids";
 
@@ -73,6 +74,100 @@ function mockServer(chars: Record<string, CharSpec>, absent: string[] = []) {
   return server as unknown as BluetoothRemoteGATTServer & {
     discoveries: () => number;
   };
+}
+
+/** A characteristic that records the order of operations against it. */
+function fakeRpcCharacteristic(log: string[]) {
+  const listeners = new Set<(ev: Event) => void>();
+  const chr = {
+    value: undefined as DataView | undefined,
+    /** Stands in for the buffer the browser recycles between notifications. */
+    scratch: new Uint8Array(64),
+    addEventListener(_t: string, fn: (ev: Event) => void) {
+      log.push("addEventListener");
+      listeners.add(fn);
+    },
+    removeEventListener(_t: string, fn: (ev: Event) => void) {
+      listeners.delete(fn);
+    },
+    async stopNotifications() {
+      log.push("stopNotifications");
+    },
+    async startNotifications() {
+      log.push("startNotifications");
+    },
+    async writeValueWithoutResponse() {
+      log.push("write");
+    },
+    /**
+     * Deliver like the browser does: a DataView onto a slice of a bigger,
+     * REUSED buffer. Anything that reads `value.buffer` whole, or keeps the
+     * view instead of copying, gets garbage — which is what corrupts frames.
+     */
+    notify(bytes: Uint8Array) {
+      chr.scratch.fill(0xee); // leftovers from the previous notification
+      chr.scratch.set(bytes, 8);
+      chr.value = new DataView(chr.scratch.buffer, 8, bytes.length);
+      // Copy: a listener may remove itself while we iterate.
+      for (const fn of [...listeners]) fn({ target: chr } as unknown as Event);
+      // The browser is free to reuse the buffer the moment dispatch returns.
+      chr.scratch.fill(0xff);
+    },
+    listenerCount: () => listeners.size,
+  };
+  return chr;
+}
+
+/** Minimal navigator.bluetooth that hands back the fake characteristic. */
+function installFakeBluetooth(
+  rpcChar: ReturnType<typeof fakeRpcCharacteristic>,
+  log: string[],
+) {
+  const deviceListeners = new Set<(ev: Event) => void>();
+  const device = {
+    name: "torabo-tsuki",
+    addEventListener: (_t: string, fn: (ev: Event) => void) =>
+      deviceListeners.add(fn),
+    removeEventListener: (_t: string, fn: (ev: Event) => void) =>
+      deviceListeners.delete(fn),
+    gatt: {
+      connected: false,
+      async connect() {
+        log.push("gatt.connect");
+        device.gatt.connected = true;
+        return {
+          connected: true,
+          async getPrimaryService() {
+            return {
+              async getCharacteristic() {
+                return rpcChar;
+              },
+            };
+          },
+          disconnect() {
+            device.gatt.connected = false;
+            for (const fn of deviceListeners)
+              fn(new Event("gattserverdisconnected"));
+          },
+        };
+      },
+      disconnect() {
+        device.gatt.connected = false;
+        for (const fn of [...deviceListeners])
+          fn(new Event("gattserverdisconnected"));
+      },
+    },
+  };
+  // navigator.bluetooth is a getter-only accessor, so it has to be redefined
+  // rather than assigned.
+  Object.defineProperty(navigator, "bluetooth", {
+    configurable: true,
+    value: {
+      async requestDevice() {
+        return device;
+      },
+    },
+  });
 }
 
 async function run() {
@@ -207,6 +302,71 @@ async function run() {
       w.length === 1 && w[0].length === 200,
       `writes=${w.length}, len=${w[0]?.length}`,
     );
+  }
+
+  // 8. Connect, disconnect, connect again — the sequence that sent the app back
+  //    to the connect screen. The transport must not be handed over before
+  //    notifications are live, or the first RPC's reply lands unheard.
+  {
+    const log: string[] = [];
+    const rpcChar = fakeRpcCharacteristic(log);
+    installFakeBluetooth(rpcChar, log);
+
+    for (const round of ["1回目", "2回目"]) {
+      log.length = 0;
+      const transport = await connect();
+
+      const subscribedBeforeReturn = log.includes("startNotifications");
+      const listenerBeforeSubscribe =
+        log.indexOf("addEventListener") < log.indexOf("startNotifications");
+      check(
+        `${round}: 返す前に購読が完了している`,
+        subscribedBeforeReturn,
+        log.join(" → "),
+      );
+      check(
+        `${round}: 購読より先に受信ハンドラを付けている`,
+        listenerBeforeSubscribe,
+        log.join(" → "),
+      );
+
+      // A notification sent the instant the transport exists must be delivered.
+      const reader = transport.readable.getReader();
+      rpcChar.notify(new Uint8Array([1, 2, 3]));
+      const { value } = await reader.read();
+      check(
+        `${round}: 直後の通知を取りこぼさない`,
+        value?.length === 3,
+        `len=${value?.length}`,
+      );
+      // The payload must survive the buffer being windowed and then recycled.
+      check(
+        `${round}: 使い回しバッファでも中身が壊れない`,
+        !!value && [...value].join(",") === "1,2,3",
+        value ? [...value].join(",") : "(なし)",
+      );
+      reader.releaseLock();
+
+      transport.abortController.abort("test disconnect");
+      await new Promise((r) => setTimeout(r, 0));
+
+      // A notification arriving after teardown must not throw. Chrome reuses
+      // the same characteristic object across reconnects, so a listener left
+      // behind here would fire on the NEXT connection and enqueue into this,
+      // now closed, stream.
+      let threw = "";
+      try {
+        rpcChar.notify(new Uint8Array([9, 9]));
+      } catch (e) {
+        threw = e instanceof Error ? e.message : String(e);
+      }
+      check(`${round}: 切断後の通知で例外を出さない`, threw === "", threw);
+      check(
+        `${round}: 切断でハンドラを外している`,
+        rpcChar.listenerCount() === 0,
+        `listeners=${rpcChar.listenerCount()}`,
+      );
+    }
   }
 
   // Render. Details are error messages, so they go in as text, never markup.

@@ -52,7 +52,13 @@ export function makeConfigBackend(
     const spec = CONFIG_SERVICES[key];
     const chr = await characteristic(key);
     const dv = await chr.readValue();
-    const bytes = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+    // Copied, not a view: the buffer is the browser's and may be reused for the
+    // next read, while callers decode this one at their leisure.
+    const bytes = new Uint8Array(
+      dv.buffer,
+      dv.byteOffset,
+      dv.byteLength,
+    ).slice();
 
     // Macros and combos get a length check because their decoders walk slots
     // until the buffer ends instead of failing: a short read there looks exactly
