@@ -1,6 +1,7 @@
 import { useContext, useEffect, useState } from "react";
 
 import { ConnectionContext } from "../rpc/ConnectionContext";
+import { waitForRpcIdle } from "../rpc/logging";
 import { toraboReadCaps } from "../backends";
 import { ToraboCaps, decodeCaps } from "./toraboCaps";
 
@@ -29,11 +30,21 @@ export function useToraboCaps(): { caps: ToraboCaps | null; loading: boolean } {
     setLoading(true);
     (async () => {
       try {
-        // Stay out of the connect handshake's way. WinRT does not take kindly to
-        // concurrent GATT discovery — the studio service's own discovery already
-        // has to retry (see src-tauri transport/gatt.rs), and firing ours on top of
-        // it is a good way to make that flakier. Nothing here is urgent.
-        await new Promise((r) => setTimeout(r, 400));
+        // Stay out of the RPC's way, and mean it.
+        //
+        // A fixed 400 ms delay was not staying out of anything: the initial load
+        // (getKeymap, listAllBehaviors, then getBehaviorDetails per behavior) runs
+        // for many seconds after connecting, so this landed in the middle of it.
+        // Every GATT operation on a device is serialised by the browser, so a
+        // service lookup here does not run beside those calls — it takes its turn
+        // ahead of one, and the request behind it reaches the keyboard late or not
+        // at all. The cost lands hardest on firmware built without the descriptor,
+        // where the lookup has to fail before anything else can proceed, which is
+        // why older keyboards stalled where newer ones did not.
+        //
+        // Nothing here is urgent: the tabs it decides between are not usable until
+        // the keymap has loaded anyway.
+        await waitForRpcIdle();
         if (cancelled) return;
 
         const raw = await toraboReadCaps();

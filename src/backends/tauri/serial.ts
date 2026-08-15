@@ -28,7 +28,7 @@ export async function connect(dev: AvailableDevice): Promise<RpcTransport> {
     "connection_data",
     async (event: { payload: Array<number> }) => {
       // Re-arm the idle timeout in rpc/logging.ts (see ble.ts).
-      bumpRpcActivity();
+      bumpRpcActivity(event.payload.length);
       let writer = response_writable.getWriter();
       await writer.write(new Uint8Array(event.payload));
       writer.releaseLock();

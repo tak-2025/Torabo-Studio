@@ -14,15 +14,22 @@
 // have to import the transport, which would make the RPC layer untestable
 // outside a browser.
 
-type Listener = () => void;
+type Listener = (bytes: number) => void;
 
 const listeners = new Set<Listener>();
 
-/** Called by the transport for every inbound RPC chunk. */
-export function bumpRpcActivity(): void {
+/**
+ * Called by the transport for every inbound RPC chunk.
+ *
+ * `bytes` is the chunk's size. It costs nothing to pass and it is what tells a
+ * stalled call apart from a call whose request never arrived: on a timeout,
+ * "0 bytes received" and "received 300 bytes then went quiet" point at opposite
+ * halves of the link.
+ */
+export function bumpRpcActivity(bytes = 0): void {
   for (const l of [...listeners]) {
     try {
-      l();
+      l(bytes);
     } catch (e) {
       console.error("[rpc] activity listener threw", e);
     }

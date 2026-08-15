@@ -27,18 +27,6 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/**
- * Log what the browser can actually see on this connection.
- *
- * A discovery failure otherwise reports only what was missing, never what was
- * there, and the two interesting answers — the service is absent, versus the
- * service is present but empty — need the second half to tell apart. Only
- * services this origin was granted appear here, which is every service the app
- * asks for, so an empty list is itself the answer.
- *
- * Never throws: this runs on the error path and must not replace the real
- * failure with one of its own.
- */
 /** Which GATT operations a characteristic declares — the thing to check before
  * choosing a write, and the first thing worth seeing when one fails. */
 function propNames(c: BluetoothRemoteGATTCharacteristic): string {
@@ -56,6 +44,18 @@ function propNames(c: BluetoothRemoteGATTCharacteristic): string {
   return on.join("|") || "なし";
 }
 
+/**
+ * Log what the browser can actually see on this connection.
+ *
+ * A discovery failure otherwise reports only what was missing, never what was
+ * there, and the two interesting answers — the service is absent, versus the
+ * service is present but empty — need the second half to tell apart. Only
+ * services this origin was granted appear here, which is every service the app
+ * asks for, so an empty list is itself the answer.
+ *
+ * Never throws: this runs on the error path and must not replace the real
+ * failure with one of its own.
+ */
 async function dumpGatt(server: BluetoothRemoteGATTServer): Promise<void> {
   try {
     const services = await server.getPrimaryServices();
@@ -432,7 +432,7 @@ async function attach(
     // most: ZMK serves the RPC characteristic over INDICATE, so a kilobyte reply
     // reaches the browser ~20 bytes per confirmed round trip and is still very
     // much alive long after any fixed deadline would have declared it dead.
-    bumpRpcActivity();
+    bumpRpcActivity(value.byteLength);
     try {
       // Window the DataView, then copy. Both matter:
       //

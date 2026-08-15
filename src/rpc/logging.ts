@@ -60,6 +60,13 @@ function withIdleTimeout<T>(
   return new Promise<T>((resolve, reject) => {
     let idleTimer: ReturnType<typeof setTimeout>;
     let quiet = 0;
+    // What arrived while this call was outstanding. On a timeout these separate
+    // the two very different failures that otherwise look identical: nothing at
+    // all means the request never reached the keyboard, whereas some-then-quiet
+    // means the reply started and stalled.
+    let chunks = 0;
+    let bytes = 0;
+    let lastAt = Date.now();
 
     const fail = (msg: string) => {
       cleanup();
@@ -70,12 +77,20 @@ function withIdleTimeout<T>(
       idleTimer = setTimeout(
         () =>
           fail(
-            `${label}: 応答が ${idleMs}ms 途絶えました（BLE が切れたか、キーボードが応答していません）`
+            `${label}: 応答が ${idleMs}ms 途絶えました` +
+              `（この呼び出し中の受信: ${chunks} チャンク / ${bytes} バイト` +
+              (chunks
+                ? `、最後の受信は ${Date.now() - lastAt}ms 前`
+                : "、まったく届いていません") +
+              "）"
           ),
         idleMs
       );
     };
-    const rearm = () => {
+    const rearm = (n: number) => {
+      chunks++;
+      bytes += n;
+      lastAt = Date.now();
       // Cheap guard against re-arming on every single 20-byte chunk.
       if (Date.now() - quiet < idleMs / 4) return;
       clearTimeout(idleTimer);
@@ -111,7 +126,8 @@ function withIdleTimeout<T>(
 // Read the next response, reusing an already-issued (possibly timed-out) read so
 // there is never more than one read() in flight on the shared stream.
 async function readNext(
-  s: ConnRpcState
+  s: ConnRpcState,
+  label: string
 ): Promise<ReadableStreamReadResult<RequestResponse>> {
   if (!s.pending) {
     s.pending = s.reader.read();
@@ -120,7 +136,7 @@ async function readNext(
     s.pending,
     RPC_IDLE_TIMEOUT_MS,
     RPC_MAX_CALL_MS,
-    "RPC read"
+    label
   );
   // Only clear once consumed; on timeout we throw above and keep `pending` so
   // the next call awaits the same read instead of issuing a second one.
@@ -128,7 +144,58 @@ async function readNext(
   return result;
 }
 
+/**
+ * Name a request the way its timeout should report it: "keymap.getKeymap"
+ * rather than "RPC read". Which call stalled is the first thing anyone asks.
+ */
+function describeRequest(req: object): string {
+  const [subsystem, body] = Object.entries(req).find(
+    ([k]) => k !== "requestId"
+  ) ?? ["rpc", null];
+  const op =
+    body && typeof body === "object" ? Object.keys(body)[0] : undefined;
+  return op ? `${subsystem}.${op}` : subsystem;
+}
+
 let rpcChain: Promise<unknown> = Promise.resolve();
+
+/* --- "is the RPC link busy?" ------------------------------------------------
+ *
+ * Other GATT work has to keep out of the way of an RPC exchange. The browser
+ * serialises every GATT operation on a device, so a service lookup fired while
+ * the keymap is loading does not run alongside it — it takes its turn in the
+ * same queue, and the request waiting behind it reaches the keyboard late or
+ * not at all. That is felt as an RPC read that goes completely silent.
+ *
+ * Callers that can wait (the capability descriptor, say) wait here instead.
+ */
+
+let inFlight = 0;
+let lastSettledAt = 0;
+
+/** True while at least one RPC call is outstanding. */
+export function rpcBusy(): boolean {
+  return inFlight > 0;
+}
+
+/**
+ * Resolve once no RPC call has been outstanding for `quietMs`.
+ *
+ * Gives up after `maxWaitMs` and resolves anyway: a caller that waits forever
+ * for a link that never goes quiet is worse than one that takes its chances.
+ */
+export async function waitForRpcIdle(
+  quietMs = 1500,
+  maxWaitMs = 60000
+): Promise<void> {
+  const deadline = Date.now() + maxWaitMs;
+  for (;;) {
+    const quietFor = inFlight > 0 ? 0 : Date.now() - lastSettledAt;
+    if (quietFor >= quietMs) return;
+    if (Date.now() >= deadline) return;
+    await new Promise((r) => setTimeout(r, Math.min(250, quietMs)));
+  }
+}
 
 async function do_call(
   conn: RpcConnection,
@@ -150,7 +217,7 @@ async function do_call(
   // Read until the response id matches our request, discarding any stale/late
   // responses left over from a previous timed-out call.
   for (;;) {
-    const { done, value } = await readNext(s);
+    const { done, value } = await readNext(s, describeRequest(request));
     if (done || !value) {
       throw new Error("No RPC response received (connection closed?)");
     }
@@ -184,11 +251,18 @@ export async function call_rpc(
 
   // Queue behind the previous call regardless of how it settled, so a failed
   // call doesn't stall or desync the queue.
+  inFlight++;
   const result = rpcChain.then(
     () => do_call(conn, req),
     () => do_call(conn, req)
   );
   rpcChain = result.catch(() => {});
+  result
+    .catch(() => {})
+    .finally(() => {
+      inFlight--;
+      lastSettledAt = Date.now();
+    });
 
   return result
     .then((r) => {
