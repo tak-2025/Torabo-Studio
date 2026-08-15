@@ -2,6 +2,7 @@ import type { RpcTransport } from "@zmkfirmware/zmk-studio-ts-client/transport/i
 import { UserCancelledError } from "@zmkfirmware/zmk-studio-ts-client/transport/errors";
 
 import { registerBackend, unregisterBackend } from "../index";
+import { bumpRpcActivity } from "../../rpc/activity";
 import type { ToraboBackend } from "../types";
 import { makeConfigBackend } from "./config";
 import { webFiles } from "./files";
@@ -372,6 +373,11 @@ async function attach(
     if (tornDown) return;
     const value = (ev.target as BluetoothRemoteGATTCharacteristic).value;
     if (!value) return;
+    // Re-arm the idle timeout in rpc/logging.ts. This is the path that needs it
+    // most: ZMK serves the RPC characteristic over INDICATE, so a kilobyte reply
+    // reaches the browser ~20 bytes per confirmed round trip and is still very
+    // much alive long after any fixed deadline would have declared it dead.
+    bumpRpcActivity();
     try {
       // Window the DataView, then copy. Both matter:
       //

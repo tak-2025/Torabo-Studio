@@ -3,12 +3,30 @@ import {
   RequestResponse,
   RpcConnection,
 } from "@zmkfirmware/zmk-studio-ts-client";
+import { onRpcActivity } from "./activity";
 
 // How long to wait for a single RPC response before giving up on it. Heavy HID
 // traffic (e.g. trackball scrolling or typing during the initial keymap load)
 // can delay or drop a response on the BLE link; without a bound, the serialized
 // queue would wait forever and wedge the whole session.
-const RPC_TIMEOUT_MS = 4000;
+//
+// The bound is an IDLE timeout, not a deadline. The old 4 s deadline was tuned
+// on the desktop's native BLE stack; in a browser it is simply wrong. ZMK serves
+// the RPC characteristic over INDICATE (zmk/app/src/studio/gatt_rpc_transport.c)
+// and every indication needs a confirmation round trip, so a reply arrives at
+// roughly 20 bytes per connection interval: getDeviceInfo lands instantly while
+// getKeymap and listAllBehaviors are kilobytes and can legitimately take tens of
+// seconds. A deadline that fits the small calls kills the big ones — small calls
+// fine, big ones timing out, which is exactly what the browser build reported.
+//
+// What actually separates "slow" from "wedged" is whether bytes are still
+// arriving, so that is what is measured. Timing out only on silence keeps the
+// wedge protection without punishing large responses.
+
+/** No inbound RPC bytes at all for this long => the exchange is dead. */
+const RPC_IDLE_TIMEOUT_MS = 15000;
+/** Absolute cap on one response, however chatty the link is. */
+const RPC_MAX_CALL_MS = 120000;
 
 // Per-connection RPC state. We keep a single long-lived reader and at most one
 // outstanding read() so a timed-out call doesn't leave a second read() pending
@@ -29,16 +47,61 @@ function stateFor(conn: RpcConnection): ConnRpcState {
   return s;
 }
 
-function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+/**
+ * Reject when `p` neither settles nor sees any RPC traffic for `idleMs`, or when
+ * it exceeds `maxMs` outright. Every inbound chunk re-arms the idle timer.
+ */
+function withIdleTimeout<T>(
+  p: Promise<T>,
+  idleMs: number,
+  maxMs: number,
+  label: string
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    let idleTimer: ReturnType<typeof setTimeout>;
+    let quiet = 0;
+
+    const fail = (msg: string) => {
+      cleanup();
+      reject(new Error(msg));
+    };
+    const arm = () => {
+      quiet = Date.now();
+      idleTimer = setTimeout(
+        () =>
+          fail(
+            `${label}: 応答が ${idleMs}ms 途絶えました（BLE が切れたか、キーボードが応答していません）`
+          ),
+        idleMs
+      );
+    };
+    const rearm = () => {
+      // Cheap guard against re-arming on every single 20-byte chunk.
+      if (Date.now() - quiet < idleMs / 4) return;
+      clearTimeout(idleTimer);
+      arm();
+    };
+
+    const unlisten = onRpcActivity(rearm);
+    const hardTimer = setTimeout(
+      () => fail(`${label}: ${maxMs}ms を超えても完了しませんでした`),
+      maxMs
+    );
+
+    function cleanup() {
+      clearTimeout(idleTimer);
+      clearTimeout(hardTimer);
+      unlisten();
+    }
+
+    arm();
     p.then(
       (v) => {
-        clearTimeout(t);
+        cleanup();
         resolve(v);
       },
       (e) => {
-        clearTimeout(t);
+        cleanup();
         reject(e);
       }
     );
@@ -53,7 +116,12 @@ async function readNext(
   if (!s.pending) {
     s.pending = s.reader.read();
   }
-  const result = await withTimeout(s.pending, RPC_TIMEOUT_MS, "RPC read");
+  const result = await withIdleTimeout(
+    s.pending,
+    RPC_IDLE_TIMEOUT_MS,
+    RPC_MAX_CALL_MS,
+    "RPC read"
+  );
   // Only clear once consumed; on timeout we throw above and keep `pending` so
   // the next call awaits the same read instead of issuing a second one.
   s.pending = null;

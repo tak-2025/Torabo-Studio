@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import type { RpcTransport } from "@zmkfirmware/zmk-studio-ts-client/transport/index";
 import { AvailableDevice } from "../types";
+import { bumpRpcActivity } from "../../rpc/activity";
 
 export async function list_devices(): Promise<Array<AvailableDevice>> {
   return await invoke("serial_list_devices");
@@ -26,6 +27,8 @@ export async function connect(dev: AvailableDevice): Promise<RpcTransport> {
   const unlisten_data = await listen(
     "connection_data",
     async (event: { payload: Array<number> }) => {
+      // Re-arm the idle timeout in rpc/logging.ts (see ble.ts).
+      bumpRpcActivity();
       let writer = response_writable.getWriter();
       await writer.write(new Uint8Array(event.payload));
       writer.releaseLock();
