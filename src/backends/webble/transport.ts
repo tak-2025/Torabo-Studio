@@ -39,6 +39,23 @@ function errText(e: unknown): string {
  * Never throws: this runs on the error path and must not replace the real
  * failure with one of its own.
  */
+/** Which GATT operations a characteristic declares — the thing to check before
+ * choosing a write, and the first thing worth seeing when one fails. */
+function propNames(c: BluetoothRemoteGATTCharacteristic): string {
+  const p = c.properties;
+  if (!p) return "properties 不明";
+  const on = (
+    [
+      "read",
+      "write",
+      "writeWithoutResponse",
+      "notify",
+      "indicate",
+    ] as const
+  ).filter((k) => p[k]);
+  return on.join("|") || "なし";
+}
+
 async function dumpGatt(server: BluetoothRemoteGATTServer): Promise<void> {
   try {
     const services = await server.getPrimaryServices();
@@ -52,7 +69,8 @@ async function dumpGatt(server: BluetoothRemoteGATTServer): Promise<void> {
           .getCharacteristics()
           .catch((e) => `<列挙に失敗: ${errText(e)}>`);
         const detail = Array.isArray(chars)
-          ? chars.map((c) => c.uuid).join(", ") || "(characteristic なし)"
+          ? chars.map((c) => `${c.uuid} [${propNames(c)}]`).join("\n    ") ||
+            "(characteristic なし)"
           : chars;
         return `  ${s.uuid}\n    ${detail}`;
       }),
@@ -192,6 +210,43 @@ function connectWithin(
       }, ms),
     ),
   ]);
+}
+
+/**
+ * Pick the write the characteristic actually supports.
+ *
+ * ZMK declares the RPC characteristic WRITE | READ | INDICATE
+ * (zmk/app/src/studio/gatt_rpc_transport.c) — it has no WRITE_WITHOUT_RESPONSE
+ * property, so writeValueWithoutResponse() is not a legal operation on it. The
+ * old code chose that branch by testing whether the *method* existed, which it
+ * always does: it lives on BluetoothRemoteGATTCharacteristic.prototype no
+ * matter what the peripheral declared. So every request went out the wrong way.
+ * The desktop transport has always written with response (bluest's
+ * `Characteristic::write`), which is why only the browser was affected.
+ *
+ * Writing with response also paces the transfer. Each 20-byte chunk is
+ * acknowledged before the next goes out, so a long request cannot outrun the
+ * link and reach the keyboard truncated — a truncated request draws no reply,
+ * and the reply to whatever came next then lands while the decoder is still
+ * waiting for the end of a frame ("Unexpected SoF mid-frame").
+ */
+function chunkWriter(
+  c: BluetoothRemoteGATTCharacteristic,
+): (b: Uint8Array) => Promise<void> {
+  // Absent `properties` (non-conforming implementation): assume the standard
+  // ZMK shape rather than guessing the exotic one.
+  if (!c.properties || c.properties.write) {
+    return c.writeValueWithResponse
+      ? (b) => c.writeValueWithResponse(b)
+      : (b) => c.writeValue(b);
+  }
+  if (c.properties.writeWithoutResponse) {
+    return (b) => c.writeValueWithoutResponse(b);
+  }
+  throw new Error(
+    "ZMK Studio の RPC characteristic が書き込みに対応していません" +
+      "（ファームウェアが想定と異なります）。",
+  );
 }
 
 /**
@@ -414,17 +469,15 @@ async function attach(
   await rpc.stopNotifications().catch(() => undefined);
   await rpc.startNotifications();
 
+  const writeChunk = chunkWriter(rpc);
+
   const writable = new WritableStream<Uint8Array>({
     async write(chunk) {
       const total = Math.ceil(chunk.length / RPC_CHUNK);
       for (let i = 0, n = 1; i < chunk.length; i += RPC_CHUNK, n++) {
         const part = chunk.slice(i, i + RPC_CHUNK);
         try {
-          if (rpc.writeValueWithoutResponse) {
-            await rpc.writeValueWithoutResponse(part);
-          } else {
-            await rpc.writeValue(part);
-          }
+          await writeChunk(part);
         } catch (e) {
           // ts-client logs a rejected write and moves on, so without a readable
           // message here the failure only ever surfaces as an RPC timeout.
