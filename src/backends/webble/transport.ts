@@ -26,6 +26,42 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/**
+ * Log what the browser can actually see on this connection.
+ *
+ * A discovery failure otherwise reports only what was missing, never what was
+ * there, and the two interesting answers — the service is absent, versus the
+ * service is present but empty — need the second half to tell apart. Only
+ * services this origin was granted appear here, which is every service the app
+ * asks for, so an empty list is itself the answer.
+ *
+ * Never throws: this runs on the error path and must not replace the real
+ * failure with one of its own.
+ */
+async function dumpGatt(server: BluetoothRemoteGATTServer): Promise<void> {
+  try {
+    const services = await server.getPrimaryServices();
+    if (services.length === 0) {
+      console.warn("[webble] GATT: 許可されたサービスが1つも見つかりません");
+      return;
+    }
+    const lines = await Promise.all(
+      services.map(async (s) => {
+        const chars = await s
+          .getCharacteristics()
+          .catch((e) => `<列挙に失敗: ${errText(e)}>`);
+        const detail = Array.isArray(chars)
+          ? chars.map((c) => c.uuid).join(", ") || "(characteristic なし)"
+          : chars;
+        return `  ${s.uuid}\n    ${detail}`;
+      }),
+    );
+    console.warn(`[webble] GATT の実際の中身:\n${lines.join("\n")}`);
+  } catch (e) {
+    console.warn("[webble] GATT の列挙に失敗:", e);
+  }
+}
+
 export interface ConnectOptions {
   /**
    * List every device instead of just keyboards, for one the filter misses.
@@ -64,12 +100,22 @@ const KEYBOARD_FILTERS: BluetoothLEScanFilter[] = [
 ];
 
 /**
- * How long to wait on the remembered keyboard before falling back to the
- * chooser. Kept short on purpose: opening the chooser needs the click's user
- * activation, which expires a few seconds after the click, so a long wait here
- * would spend the very permission the fallback depends on.
+ * How long to wait on the remembered keyboard before giving up on it.
+ *
+ * Kept short because opening the chooser needs the click's user activation,
+ * which expires a few seconds after the click. But short means it fires often —
+ * a first connection with bonding and discovery routinely takes longer than
+ * this — so what happens on expiry has to be safe. See `connectWithin`.
  */
 const REMEMBERED_CONNECT_TIMEOUT_MS = 3000;
+
+/**
+ * Remembered devices whose reconnect already failed this session.
+ *
+ * Without this the same unreachable keyboard is retried on every click, and the
+ * chooser — the thing that would actually fix it — is never reached.
+ */
+const rememberedFailed = new Set<string>();
 
 /**
  * Devices this origin has already been granted, newest grant last.
@@ -108,6 +154,55 @@ async function requestDevice(allDevices: boolean): Promise<BluetoothDevice> {
     });
 }
 
+/**
+ * Connect, but stop waiting after `ms` — and make sure the attempt we stopped
+ * waiting for cannot outlive us.
+ *
+ * `Promise.race` only abandons the loser; `gatt.connect()` keeps negotiating in
+ * the background and eventually succeeds. Left alone it produces a second,
+ * unowned link to the same device, and a subsequent attach then runs its
+ * discovery against a connection someone else is still setting up — which is
+ * how "the service is there but it has no characteristics" happens on hardware
+ * that plainly has both. So the abandoned attempt is disconnected the moment it
+ * settles, and no caller may start another attach on this device before then.
+ */
+function connectWithin(
+  gatt: BluetoothRemoteGATTServer,
+  ms: number,
+): Promise<BluetoothRemoteGATTServer> {
+  let abandoned = false;
+  const pending = gatt.connect();
+
+  pending.then(
+    () => {
+      if (abandoned) gatt.disconnect();
+    },
+    () => {
+      // Failed on its own; nothing to clean up.
+    },
+  );
+
+  return Promise.race([
+    pending,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => {
+        abandoned = true;
+        reject(new Error(`接続がタイムアウトしました（${ms}ms）`));
+      }, ms),
+    ),
+  ]);
+}
+
+/**
+ * Serialises connection attempts.
+ *
+ * The UI can fire a second attempt while the first is still negotiating (an
+ * impatient second click, or a reconnect racing a manual connect), and two
+ * overlapping GATT setups on one device corrupt each other's discovery in
+ * exactly the way described above.
+ */
+let pendingConnect: Promise<unknown> = Promise.resolve();
+
 export async function connect(
   options: ConnectOptions = {},
 ): Promise<RpcTransport> {
@@ -117,18 +212,34 @@ export async function connect(
     );
   }
 
+  const attempt = pendingConnect
+    .catch(() => undefined)
+    .then(() => connectOnce(options));
+  pendingConnect = attempt.catch(() => undefined);
+  return attempt;
+}
+
+async function connectOnce(options: ConnectOptions): Promise<RpcTransport> {
   if (!options.allDevices) {
-    // Only the most recent grant, and only one attempt: that is the keyboard
-    // they last used, and anything longer eats the activation the chooser needs.
+    // Only the most recent grant: that is the keyboard they last used.
     const last = (await rememberedDevices()).at(-1);
-    if (last) {
+    if (last && !rememberedFailed.has(last.id)) {
       try {
         return await attach(last, REMEMBERED_CONNECT_TIMEOUT_MS);
       } catch (e) {
-        // Switched off, out of range, or paired to something else now. Fall
-        // through and let them pick.
+        // Switched off, out of range, or simply slower than the budget. Do NOT
+        // fall through to the chooser in the same call: the abandoned connect
+        // may still be settling, and opening a second link to the same device
+        // is the bug this whole path is built to avoid. Retire the device for
+        // this session and ask for another click, which arrives with fresh user
+        // activation and goes straight to the chooser.
         console.warn(`remembered device ${last.name} unreachable:`, e);
         last.gatt?.disconnect();
+        rememberedFailed.add(last.id);
+        throw new Error(
+          "前回のキーボードに届きませんでした。" +
+            "もう一度「Bluetooth」を押すと、選択画面が開きます。",
+        );
       }
     }
   }
@@ -136,13 +247,11 @@ export async function connect(
   try {
     return await attach(await requestDevice(options.allDevices === true));
   } catch (e) {
-    // The activation from the click can lapse while a remembered keyboard is
-    // timing out, and the chooser then refuses to open. Nothing is wrong except
-    // the timing, so say so instead of showing a SecurityError.
+    // User activation can lapse before the chooser opens; nothing is wrong
+    // except the timing, so say so instead of showing a SecurityError.
     if (e instanceof DOMException && e.name === "SecurityError") {
       throw new Error(
-        "前回のキーボードに届かなかったため、選択画面を開けませんでした。" +
-          "もう一度「Bluetooth」を押してください。",
+        "選択画面を開けませんでした。もう一度「Bluetooth」を押してください。",
       );
     }
     throw e;
@@ -158,28 +267,41 @@ async function attach(
   const label = device.name || "Unknown";
   const gatt = device.gatt;
   const server = await (timeoutMs
-    ? Promise.race([
-        gatt.connect(),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(new Error(`接続がタイムアウトしました（${timeoutMs}ms）`)),
-            timeoutMs,
-          ),
-        ),
-      ])
+    ? connectWithin(gatt, timeoutMs)
     : gatt.connect());
 
+  // Discovery, with the two failures kept apart. They mean opposite things and
+  // used to share one message that named the wrong culprit for one of them.
   let rpc: BluetoothRemoteGATTCharacteristic;
+  let svc: BluetoothRemoteGATTService;
   try {
-    const svc = await server.getPrimaryService(RPC_SERVICE);
-    rpc = await svc.getCharacteristic(RPC_CHAR);
+    svc = await server.getPrimaryService(RPC_SERVICE);
   } catch (e) {
+    // No Studio service at all: this really is a firmware or device question.
+    await dumpGatt(server);
     server.disconnect();
     throw new Error(
       "ZMK Studio サービスが見つかりません" +
         "（Studio 対応ファームウェアが書き込まれているか、" +
         `他のアプリが接続中でないかご確認ください）: ${errText(e)}`,
+    );
+  }
+
+  try {
+    rpc = await svc.getCharacteristic(RPC_CHAR);
+  } catch (e) {
+    // The service is there but its characteristic is not — which the firmware
+    // cannot actually do, since ZMK declares both in one static
+    // BT_GATT_SERVICE_DEFINE. So the fault is on this side of the link: a
+    // half-set-up connection, or a stale attribute table. Neither is fixed by
+    // reflashing, so do not send the user off to do that.
+    await dumpGatt(server);
+    server.disconnect();
+    throw new Error(
+      "キーボードとの接続が中途半端な状態です。" +
+        "いったんページを再読み込みして接続し直してください" +
+        "（それでも直らない場合は、キーボードのペアリングを削除して再ペアリングしてください）: " +
+        errText(e),
     );
   }
 
