@@ -45,6 +45,24 @@ pub async fn transport_send_data(
     Ok(())
 }
 
+/// Whether a BLE device handle is being held for this connection.
+///
+/// Only `gatt_connect` stores one; `serial_connect` leaves it `None`, because a
+/// CDC-ACM cable has no GATT to reach. That difference is exactly what the
+/// frontend needs and could not previously see: it assumed the desktop build
+/// could always read the torabo config services, so a USB connection offered
+/// every settings tab and then failed each one with "No active BLE connection".
+///
+/// Firmware with the RPC tunnel makes the question moot — the tunnel backend
+/// registers itself and works over the cable — so this only decides what a
+/// desktop USB connection to PRE-TUNNEL firmware is allowed to show.
+#[command]
+pub async fn transport_has_device(
+    state: State<'_, ActiveConnection<'_>>,
+) -> Result<bool, ()> {
+    Ok(state.device.lock().await.is_some())
+}
+
 #[command]
 pub async fn transport_close(
     req: Request<'_>,

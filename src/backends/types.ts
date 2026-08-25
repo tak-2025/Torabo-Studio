@@ -1,12 +1,22 @@
 /**
  * What a "backend" has to provide, so the panels don't care where they run.
  *
- * The torabo features live on their own GATT services, separate from ZMK Studio's
- * protobuf RPC. Reaching them needs a platform BLE stack, and we have three:
- * Tauri/Rust (desktop), Capacitor (Android), and the browser's Web Bluetooth.
- * The wire formats are identical everywhere — only the plumbing differs — so a
- * backend is a thin byte-carrier and every bit of encoding/decoding stays in the
- * feature modules where it already is.
+ * There are two ways to reach the torabo settings, and which one is available
+ * depends on the firmware, not on the app:
+ *
+ *  - Their own BLE GATT services, separate from ZMK Studio's protobuf RPC.
+ *    Reaching those needs a platform BLE stack, and we have three: Tauri/Rust
+ *    (desktop), Capacitor (Android) and the browser's Web Bluetooth. This is the
+ *    original path and every shipped firmware has it — but being GATT, it is
+ *    unreachable over a USB cable.
+ *  - The Studio RPC itself, via the tunnel subsystem (see backends/rpc/config.ts
+ *    and PLAN-usb-tunnel.md). Firmware new enough to have it carries the same
+ *    blobs inside the RPC, so the settings work over any transport, USB
+ *    included. Older firmware has no tunnel, and USB stays keymap-only there.
+ *
+ * The wire formats are identical across all of them — only the plumbing differs
+ * — so a backend is a thin byte-carrier and every bit of encoding/decoding stays
+ * in the feature modules where it already is.
  *
  * Panels import from `../backends`, never from a specific implementation.
  */
@@ -18,13 +28,14 @@ export type AvailableDevice = { label: string; id: string };
  * Read/write access to the torabo config services.
  *
  * Every method may reject: the keyboard may be connected over a transport that
- * cannot reach these services (USB), or be running firmware built without the
- * feature. Callers already treat a rejection as "this feature is unavailable"
- * and say so in the panel, so backends should let the error through rather than
- * inventing empty config.
+ * cannot reach these settings (USB against firmware with no tunnel), or be
+ * running firmware built without the feature at all. Callers already treat a
+ * rejection as "this feature is unavailable" and say so in the panel, so
+ * backends should let the error through rather than inventing empty config.
  */
 export interface ToraboConfigBackend {
-  /** Capability descriptor (e1f4a000). Rejects on firmware that predates it. */
+  /** Capability descriptor (GATT e1f4a000 / tunnel feature 0x00). Rejects on
+   * firmware that predates it. */
   toraboReadCaps(): Promise<Uint8Array>;
 
   trackballReadConfig(): Promise<Uint8Array>;
@@ -113,8 +124,12 @@ export interface FilesBackend {
 }
 
 export interface ToraboBackend extends ToraboConfigBackend, FilesBackend {
-  /** For diagnostics and error messages. */
-  readonly kind: "tauri" | "capacitor" | "webble";
+  /**
+   * For diagnostics and error messages. "rpc" is the transport-blind tunnel
+   * backend, so it says nothing about how the keyboard is attached — that is
+   * the point of it.
+   */
+  readonly kind: "tauri" | "capacitor" | "webble" | "rpc";
 }
 
 /** Tauri announces itself on the window; nothing else does. */

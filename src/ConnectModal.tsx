@@ -14,10 +14,15 @@ export type TransportFactory = {
   label: string;
   isWireless?: boolean;
   /**
-   * i18n key for a one-line note on what this connection can reach. The torabo
-   * config services live on GATT, so a USB link carries the keymap and nothing
-   * else — better to say so before connecting than to leave someone hunting for
-   * tabs that are not there.
+   * A cable, so the OS gives the port to one application at a time. Used to warn
+   * about that before connecting rather than after Torabo-Float has gone quiet.
+   */
+  isUsb?: boolean;
+  /**
+   * i18n key for a one-line note on what this connection can reach. What a USB
+   * link reaches now depends on the firmware — with the settings tunnel it is
+   * everything, without it the keymap alone — and that is better said before
+   * connecting than left for someone hunting for tabs that are not there.
    *
    * A key rather than a string because the transport table is built at module
    * scope, where hooks (and so the translator) are not available.
@@ -316,6 +321,10 @@ export const ConnectModal = ({
   const dialog = useModalRef(open || false, false, false);
 
   const haveTransports = useMemo(() => transports.length > 0, [transports]);
+  // Sits under the picker rather than under the USB button: the desktop's
+  // device list has no room for per-transport notes, and this applies to any
+  // USB connection it offers.
+  const haveUsb = useMemo(() => transports.some((tf) => tf.isUsb), [transports]);
 
   return (
     <GenericModal ref={dialog} className="max-w-xl">
@@ -328,6 +337,11 @@ export const ConnectModal = ({
       {haveTransports
         ? connectOptions(transports, onTransportCreated, t, open)
         : noTransportsOptionsPrompt(t)}
+      {haveTransports && haveUsb && (
+        <p className="mt-3 text-xs text-base-content/60 leading-snug">
+          {t("connect.note.usbExclusive")}
+        </p>
+      )}
     </GenericModal>
   );
 };

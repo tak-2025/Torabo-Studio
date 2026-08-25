@@ -1,6 +1,7 @@
 import type { FileFilter, FilesBackend, ToraboBackend } from "./types";
 import { isTauri } from "./types";
 import { tauriBackend } from "./tauri";
+import { hasBleDevice } from "./tauri/device";
 import { webFiles } from "./webble/files";
 
 export type {
@@ -22,16 +23,32 @@ export { isTauri, BACKUP_FILTERS, KEYMAP_FILTERS } from "./types";
  * backend is always there (Rust owns the connection), but a browser backend only
  * exists once the user has picked a device and the GATT server is up — so the
  * transport registers it at connect and clears it at disconnect.
+ *
+ * Two things can register: the Web Bluetooth transport, which publishes a GATT
+ * backend as it attaches, and App.tsx, which publishes the RPC tunnel backend
+ * when the firmware turns out to speak it. The BLE GATT path wins where both
+ * apply, so a Bluetooth connection behaves exactly as it always has.
  */
 
 let registered: ToraboBackend | null = null;
 
 /**
  * Install the backend for a connection that the frontend owns (Web Bluetooth,
- * Capacitor). Pass null on disconnect so a stale handle can't be used.
+ * the RPC tunnel, Capacitor). Pass null on disconnect so a stale handle can't be
+ * used.
  */
 export function registerBackend(backend: ToraboBackend | null): void {
   registered = backend;
+}
+
+/**
+ * The backend installed for the current connection, if any.
+ *
+ * For deciding whether to install another one — not for talking to the keyboard,
+ * which is what `activeBackend()` is for.
+ */
+export function registeredBackend(): ToraboBackend | null {
+  return registered;
 }
 
 /**
@@ -48,16 +65,57 @@ export function unregisterBackend(backend: ToraboBackend): void {
 
 export function activeBackend(): ToraboBackend {
   if (registered) return registered;
-  if (isTauri()) return tauriBackend;
+  if (isTauri() && tauriGatt) return tauriBackend;
   throw new Error(
     "この接続では torabo 独自機能を利用できません。" +
-      "USB 接続ではキーマップ編集のみ利用できます（独自設定は Bluetooth 接続が必要です）。",
+      "USB でも使うにはキーボードのファームウェアがトンネル対応である必要があります" +
+      "（旧ファームウェアではキーマップ編集のみ。独自設定は Bluetooth 接続でご利用ください）。",
   );
 }
 
-/** True when the torabo config services are reachable right now. */
+/* --- Is the desktop build's GATT path usable? --------------------------------
+ *
+ * `isTauri()` used to stand in for this, and it was wrong for USB: the desktop
+ * config commands all go through a BLE device handle that only `gatt_connect`
+ * stores, so a serial connection showed every settings tab and then failed each
+ * one with "No active BLE connection". Ask Rust instead.
+ *
+ * Cached as a plain boolean because the panels need this synchronously while
+ * rendering. App.tsx refreshes it during connect — before the connection state
+ * is published, so the first render after connecting already has the answer —
+ * and clears it on disconnect.
+ */
+
+let tauriGatt = false;
+let tauriGattOwner: object | null = null;
+
+/**
+ * Ask the desktop backend whether it is holding a BLE device, on behalf of
+ * `owner` — pass whatever identifies the connection (its RpcConnection will do).
+ */
+export async function refreshTauriGattAccess(owner: object): Promise<boolean> {
+  tauriGatt = isTauri() ? await hasBleDevice() : false;
+  tauriGattOwner = tauriGatt ? owner : null;
+  return tauriGatt;
+}
+
+/**
+ * Forget the cached answer; the connection it described is over.
+ *
+ * Only if it is still `owner`'s answer. A teardown can fire late — after the
+ * user has already connected again — and an unconditional clear would take the
+ * new connection's access down with the old one. Same reasoning as
+ * `unregisterBackend`.
+ */
+export function clearTauriGattAccess(owner: object): void {
+  if (tauriGattOwner !== owner) return;
+  tauriGatt = false;
+  tauriGattOwner = null;
+}
+
+/** True when the torabo settings are reachable right now, by any route. */
 export function hasConfigAccess(): boolean {
-  return registered !== null || isTauri();
+  return registered !== null || (isTauri() && tauriGatt);
 }
 
 // --- Config services --------------------------------------------------------

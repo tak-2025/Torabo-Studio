@@ -71,7 +71,11 @@ const ja: Dict = {
   "connect.unsupportedMid": " または ",
   "connect.unsupportedPost": "を使って ZMK デバイスに接続します。",
   "connect.note.webSerial":
-    "キーマップのみ。トラックボール等の設定は Bluetooth 接続が必要です。",
+    "ファームウェアがトンネル対応なら全機能。" +
+    "旧ファームウェアではキーマップのみで、トラックボール等の設定は Bluetooth 接続が必要です。",
+  "connect.note.usbExclusive":
+    "USB ポートは 1 つのアプリしか使えません。Torabo-Float を USB で使っている場合は、" +
+    "閉じてから接続してください（Bluetooth なら同時に使えます）。",
   "connect.note.webBluetooth":
     "全機能。一度選べば、次回からは選択なしで前回のキーボードにつながります。",
   "connect.note.webBluetoothAll":
@@ -213,7 +217,11 @@ const en: Dict = {
   "connect.unsupportedMid": " or ",
   "connect.unsupportedPost": " to connect to ZMK devices.",
   "connect.note.webSerial":
-    "Keymap only. Trackball and other settings need a Bluetooth connection.",
+    "Everything, on firmware that has the settings tunnel. On older firmware, " +
+    "keymap only — trackball and other settings then need Bluetooth.",
+  "connect.note.usbExclusive":
+    "A USB port serves one app at a time. Close Torabo-Float before connecting " +
+    "over USB; over Bluetooth the two run side by side.",
   "connect.note.webBluetooth":
     "Everything. After the first time, reconnects without asking again.",
   "connect.note.webBluetoothAll":

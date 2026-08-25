@@ -1,6 +1,9 @@
 import { AppHeader } from "./AppHeader";
 
-import { create_rpc_connection } from "@zmkfirmware/zmk-studio-ts-client";
+import {
+  create_rpc_connection,
+  type RpcConnection,
+} from "@zmkfirmware/zmk-studio-ts-client";
 import { call_rpc } from "./rpc/logging";
 
 import type { Notification } from "@zmkfirmware/zmk-studio-ts-client/studio";
@@ -19,7 +22,16 @@ import {
   connect as tauri_serial_connect,
   list_devices as serial_list_devices,
 } from "./backends/tauri/serial";
-import { isTauri } from "./backends";
+import {
+  clearTauriGattAccess,
+  isTauri,
+  refreshTauriGattAccess,
+  registerBackend,
+  registeredBackend,
+  unregisterBackend,
+} from "./backends";
+import type { ToraboBackend } from "./backends";
+import { makeRpcBackend, probeRpcTunnel } from "./backends/rpc/config";
 import MainPanels from "./MainPanels";
 import { UndoRedoContext, useUndoRedo } from "./undoRedo";
 import { usePub, useSub } from "./usePubSub";
@@ -43,8 +55,12 @@ const canReconnectSilently =
 const TRANSPORTS: TransportFactory[] = [
   navigator.serial && {
     label: "USB",
-    // In a browser this reaches the keymap only: the torabo config services are
-    // GATT, so USB cannot see them. The desktop build overrides this entry below.
+    isUsb: true,
+    // What this reaches depends on the firmware, not on the browser: with the
+    // settings tunnel the RPC carries the torabo config too, and without it the
+    // config lives on GATT where a cable cannot see it. The note says both.
+    // Only shown in the browser picker; the desktop build overrides this entry
+    // below and its device list has no per-transport notes.
     noteKey: isTauri() ? undefined : "connect.note.webSerial",
     connect: serial_connect,
   },
@@ -102,6 +118,7 @@ const TRANSPORTS: TransportFactory[] = [
     ? [
         {
           label: "USB",
+          isUsb: true,
           pick_and_connect: {
             connect: tauri_serial_connect,
             list: serial_list_devices,
@@ -167,6 +184,59 @@ async function listen_for_notifications(
   notification_stream.cancel();
 }
 
+/**
+ * Decide how this connection reaches the torabo settings, and publish it.
+ *
+ * Three outcomes, in order:
+ *
+ *  1. Web Bluetooth has already registered its GATT backend while attaching
+ *     (backends/webble/transport.ts). That is the path Bluetooth has always
+ *     used, it owns its own teardown, and it stays — no probe, no second
+ *     registration.
+ *  2. Otherwise — browser USB, desktop USB, desktop Bluetooth — ask the
+ *     keyboard whether its firmware carries the settings inside the RPC. If it
+ *     does, one transport-blind backend serves all three.
+ *  3. If it does not, nothing is registered. The desktop still has its native
+ *     BLE path for a Bluetooth connection, which `refreshTauriGattAccess`
+ *     establishes; a USB cable to pre-tunnel firmware is honestly keymap-only,
+ *     and the panels say so instead of appearing and failing.
+ *
+ * Returns the teardown for whatever it published.
+ */
+async function setupToraboAccess(
+  conn: RpcConnection,
+  signal: AbortSignal,
+): Promise<() => void> {
+  if (registeredBackend()) return () => undefined;
+
+  // Whether the desktop's native GATT commands can work on this connection.
+  // Answers false for a serial connection, which is what stops a desktop USB
+  // session from offering settings tabs that could only fail.
+  await refreshTauriGattAccess(conn);
+  const releaseTauri = () => clearTauriGattAccess(conn);
+  signal.addEventListener("abort", releaseTauri, { once: true });
+
+  if (signal.aborted || !(await probeRpcTunnel(conn))) {
+    return releaseTauri;
+  }
+  // Checked again: the probe is a round trip to the keyboard, and the link can
+  // go away during it. Publishing then would register a backend whose abort
+  // listener never gets a chance to run.
+  if (signal.aborted) return releaseTauri;
+
+  const backend: ToraboBackend = makeRpcBackend(conn);
+  registerBackend(backend);
+
+  const teardown = () => {
+    // Both are no-ops unless this connection's registration is still the live
+    // one, so a late teardown cannot disturb a newer connection.
+    unregisterBackend(backend);
+    releaseTauri();
+  };
+  signal.addEventListener("abort", teardown, { once: true });
+  return teardown;
+}
+
 async function connect(
   transport: RpcTransport,
   setConn: Dispatch<ConnectionState>,
@@ -191,15 +261,19 @@ async function connect(
     return;
   }
 
+  // Before the connection is published, so the first render of the panels
+  // already knows which tabs this keyboard can actually serve.
+  const releaseToraboAccess = await setupToraboAccess(conn, signal);
+
+  const onConnectionEnded = () => {
+    releaseToraboAccess();
+    setConnectedDeviceName(undefined);
+    setConn({ conn: null });
+  };
+
   listen_for_notifications(conn.notification_readable, signal)
-    .then(() => {
-      setConnectedDeviceName(undefined);
-      setConn({ conn: null });
-    })
-    .catch((_e) => {
-      setConnectedDeviceName(undefined);
-      setConn({ conn: null });
-    });
+    .then(onConnectionEnded)
+    .catch(onConnectionEnded);
 
   setConnectedDeviceName(details.name);
   setConn({ conn });
