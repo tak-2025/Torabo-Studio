@@ -26,8 +26,17 @@ export { isTauri, BACKUP_FILTERS, KEYMAP_FILTERS } from "./types";
  *
  * Two things can register: the Web Bluetooth transport, which publishes a GATT
  * backend as it attaches, and App.tsx, which publishes the RPC tunnel backend
- * when the firmware turns out to speak it. The BLE GATT path wins where both
- * apply, so a Bluetooth connection behaves exactly as it always has.
+ * — but only for a connection that has no native GATT path of its own, i.e.
+ * browser USB or desktop USB (App.tsx's `setupToraboAccess`). A Bluetooth
+ * connection never gets the tunnel registered on it: browser Bluetooth
+ * registers its own GATT backend here directly, and desktop Bluetooth is
+ * served by the native-GATT fallback below (`tauriGatt`/`tauriBackend`)
+ * without anything being `registered` at all. That split matters because the
+ * torabo configs run to ~1.5KB, comfortably chunked over GATT
+ * (src-tauri/src/transport/*.rs's `write_chunked`) but too large for a
+ * single RPC tunnel frame's ATT write on Windows/WinRT — see
+ * `setupToraboAccess`'s doc comment for why that combination used to drop
+ * the connection.
  */
 
 let registered: ToraboBackend | null = null;

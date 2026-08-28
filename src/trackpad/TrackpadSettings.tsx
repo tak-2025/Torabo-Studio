@@ -207,8 +207,8 @@ export function TrackpadSettings() {
           </div>
 
           <div className="rounded-md border border-info/40 bg-info/10 px-4 py-3 text-sm leading-relaxed text-base-content/80 self-start max-w-2xl">
-            書き込みは即反映され、本体に保存されます。空・不正な設定は必ず通常のカーソル移動に戻ります。
-            デバイスは上のプルダウンで切り替え、それぞれ個別に保存されます。
+            書き込みは即反映され、本体に保存されます。空・不正な設定は必ず通常のカーソル移動に戻ります。{" "}
+            {t("trackpad.writeScope")}
           </div>
         </>
       )}

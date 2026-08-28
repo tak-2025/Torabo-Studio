@@ -141,8 +141,21 @@ pub async fn gatt_connect(
                     // A write failure no longer panics the pump (which used to kill
                     // the whole connection on the first transient hiccup). Log it and
                     // tear the connection down cleanly instead.
-                    if let Err(e) = c.write(&data).await {
-                        eprintln!("[gatt] RPC write failed (link likely dropped): {:?}", e);
+                    //
+                    // Chunked the same way `write_chunked` splits the torabo config
+                    // characteristics: a single RPC frame can exceed the negotiated
+                    // ATT MTU (e.g. a multi-hundred-byte keymap write, or — before
+                    // App.tsx stopped registering the tunnel on desktop BLE — a
+                    // ~1.5KB tunneled torabo config), and `Characteristic::write()`
+                    // is one ATT write with no Write Long promotion on Windows/WinRT,
+                    // so an oversized frame errors out here and used to take the
+                    // whole connection down with it. Splitting is safe on the wire:
+                    // the RPC's own framing (length-prefixed protobuf, see
+                    // ts-client's framing.js) lives inside the byte stream, not at
+                    // ATT write boundaries, so the firmware reassembles split writes
+                    // exactly as it does the plain torabo config chunks.
+                    if let Err(e) = super::write_chunked(&c, &data).await {
+                        eprintln!("[gatt] RPC write failed (link likely dropped): {}", e);
                         break;
                     }
                 }

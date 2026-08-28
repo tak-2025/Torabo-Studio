@@ -7,8 +7,14 @@
 //! see docs/DESIGN-timing.md); the frontend (src/timing/timingConfig.ts)
 //! encodes/decodes it.
 //!
-//! The wire is fixed at 96 bytes, so it always fits in a single ATT write — no
-//! chunking needed (see write_chunked in mod.rs for the ones that do).
+//! The wire is fixed at 96 bytes. That fits in a single ATT write only once the
+//! MTU has been negotiated up past 99 bytes; on the default 23-byte MTU (or on
+//! Windows/WinRT, which does not reliably promote an oversized payload into an
+//! ATT Write Long — see write_chunked in mod.rs) a single `chrc.write()` of the
+//! full blob can fail. The firmware's write handler reassembles consecutive
+//! offset==0 chunks for this service exactly like it does for trackpad (see
+//! torabo-tsuki_ext_FW timing/src/gatt_service.c), so writes go through
+//! write_chunked too.
 //!
 //! UUIDs match the firmware (allocated after led e1f4ae00):
 //!   service e1f4b000-1c2d-4b6e-9f3a-0a1b2c3d4e5f
@@ -72,10 +78,10 @@ pub async fn timing_write_config(
 ) -> Result<(), String> {
     let chrc = cfg_characteristic(&state).await?;
     if let InvokeBody::Raw(data) = req.body() {
-        // Fits in one ATT write; the firmware rejects a fragmented write outright.
-        chrc.write(data.as_slice())
-            .await
-            .map_err(|e| format!("Failed to write timing config: {}", e.message()))
+        // The 96-byte wire can exceed the negotiated ATT MTU-3 (e.g. the default
+        // 23-byte MTU, or Windows/WinRT not promoting to a Write Long), so chunk
+        // it the same way trackpad does; the firmware reassembles either way.
+        super::write_chunked(&chrc, data.as_slice()).await
     } else {
         Err("timing_write_config expects a raw byte body".to_string())
     }

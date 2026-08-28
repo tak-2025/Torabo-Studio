@@ -187,19 +187,26 @@ async function listen_for_notifications(
 /**
  * Decide how this connection reaches the torabo settings, and publish it.
  *
- * Three outcomes, in order:
+ * Four outcomes, in order:
  *
  *  1. Web Bluetooth has already registered its GATT backend while attaching
  *     (backends/webble/transport.ts). That is the path Bluetooth has always
  *     used, it owns its own teardown, and it stays — no probe, no second
  *     registration.
- *  2. Otherwise — browser USB, desktop USB, desktop Bluetooth — ask the
- *     keyboard whether its firmware carries the settings inside the RPC. If it
- *     does, one transport-blind backend serves all three.
- *  3. If it does not, nothing is registered. The desktop still has its native
- *     BLE path for a Bluetooth connection, which `refreshTauriGattAccess`
- *     establishes; a USB cable to pre-tunnel firmware is honestly keymap-only,
- *     and the panels say so instead of appearing and failing.
+ *  2. Desktop Bluetooth: `refreshTauriGattAccess` finds the native BLE device
+ *     handle Rust is already holding for this connection. That wins outright,
+ *     with no tunnel probe at all — its chunked GATT writes
+ *     (src-tauri/src/transport/*.rs, `write_chunked`) are what a ~1.5KB
+ *     torabo config (e.g. the trackpad tab) needs. Sent as an RPC tunnel
+ *     frame instead, that same config is one oversized ATT write, which
+ *     WinRT rejects and which used to take the whole connection down with it
+ *     (src-tauri/src/transport/gatt.rs's write pump).
+ *  3. Otherwise — browser USB, desktop USB — ask the keyboard whether its
+ *     firmware carries the settings inside the RPC. If it does, one
+ *     transport-blind backend serves both.
+ *  4. If it does not, nothing is registered. A USB cable to pre-tunnel
+ *     firmware is honestly keymap-only, and the panels say so instead of
+ *     appearing and failing.
  *
  * Returns the teardown for whatever it published.
  */
@@ -210,11 +217,22 @@ async function setupToraboAccess(
   if (registeredBackend()) return () => undefined;
 
   // Whether the desktop's native GATT commands can work on this connection.
-  // Answers false for a serial connection, which is what stops a desktop USB
-  // session from offering settings tabs that could only fail.
-  await refreshTauriGattAccess(conn);
+  // True only for desktop Bluetooth — false for a serial connection (no BLE
+  // device handle to hold) and false in the browser (no Tauri at all).
+  const hasNativeGatt = await refreshTauriGattAccess(conn);
   const releaseTauri = () => clearTauriGattAccess(conn);
   signal.addEventListener("abort", releaseTauri, { once: true });
+
+  // Desktop Bluetooth already has a working, chunked-write path straight to
+  // the keyboard's GATT services (`activeBackend()`'s native-GATT fallback in
+  // backends/index.ts). Registering the RPC tunnel on top would make
+  // `activeBackend()` prefer it instead (it checks `registered` first), and
+  // the tunnel cannot carry these payloads over this same link without the
+  // ATT write splitting the native path already does. So this connection is
+  // done: no probe, nothing registered here.
+  if (hasNativeGatt) {
+    return releaseTauri;
+  }
 
   if (signal.aborted || !(await probeRpcTunnel(conn))) {
     return releaseTauri;

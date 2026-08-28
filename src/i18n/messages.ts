@@ -75,8 +75,8 @@ const ja: Dict = {
     "ファームウェアがトンネル対応なら全機能。" +
     "旧ファームウェアではキーマップのみで、トラックボール等の設定は Bluetooth 接続が必要です。",
   "connect.note.usbExclusive":
-    "USB ポートは 1 つのアプリしか使えません。Torabo-Float を USB で使っている場合は、" +
-    "閉じてから接続してください（Bluetooth なら同時に使えます）。",
+    "キーボードと通信できるのは USB でも Bluetooth でも一度に 1 つのアプリだけです。" +
+    "Torabo-Float など他のアプリを使っている場合は、閉じてから接続してください。",
   "connect.note.webBluetooth":
     "全機能。一度選べば、次回からは選択なしで前回のキーボードにつながります。",
   "connect.note.webBluetoothAll":
@@ -190,6 +190,12 @@ const ja: Dict = {
   "coast.unavailable":
     "このファームウェアは慣性スクロールに対応していません。使うにはファームウェアの更新が必要です。",
 
+  // トラックパッド設定画面の下部バナー。以前は「それぞれ個別に保存されます」と
+  // 書いていたが、実装は常に全デバイス分の設定をひとつの blob にまとめて一括
+  // 書き込みしており、デバイスごとの個別保存ではない。文言を実装に合わせた。
+  "trackpad.writeScope":
+    "デバイスは上のプルダウンで切り替えます。書き込みは全デバイスまとめて保存されます。",
+
   // Post-connect empty states (before the first Read)
   "empty.read": "まず青い「① 読み込む」を押すと、現在の設定が表示されます。",
   "empty.macros":
@@ -251,8 +257,8 @@ const en: Dict = {
     "Everything, on firmware that has the settings tunnel. On older firmware, " +
     "keymap only — trackball and other settings then need Bluetooth.",
   "connect.note.usbExclusive":
-    "A USB port serves one app at a time. Close Torabo-Float before connecting " +
-    "over USB; over Bluetooth the two run side by side.",
+    "The keyboard talks to one app at a time, over USB and Bluetooth alike. " +
+    "Close Torabo-Float (or any other app using it) before connecting.",
   "connect.note.webBluetooth":
     "Everything. After the first time, reconnects without asking again.",
   "connect.note.webBluetoothAll":
@@ -353,6 +359,12 @@ const en: Dict = {
     "This is a per-device setting — it is saved for the device selected above.",
   "coast.unavailable":
     "This firmware does not support inertial scroll. Update the firmware to use it.",
+
+  // Bottom banner on the trackpad settings screen. Used to say each device is
+  // saved separately; the implementation actually bundles every device's
+  // config into one blob and writes it all at once, so the copy now matches.
+  "trackpad.writeScope":
+    "Switch devices with the dropdown above. A write saves every device together.",
 
   "empty.read": 'Press the blue "① Read" button to load the current settings.',
   "empty.macros": 'Press the blue "Read" button to load your saved macros.',
