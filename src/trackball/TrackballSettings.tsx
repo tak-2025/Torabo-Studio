@@ -5,13 +5,19 @@ import { fetchLayerInfo } from "../rpc/keyboardInfo";
 import { trackballReadConfig, trackballWriteConfig } from "../backends";
 import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
 import { useT } from "../i18n";
+import { ToraboCaps, hasTrackballCoast } from "../caps/toraboCaps";
 import {
   AxisCfg,
+  CoastCfg,
   decodeZtc,
   encodeZtc,
   LayerCfg,
   Role,
   ROLE_LABELS,
+  ZTC_COAST_FRICTION_MAX,
+  ZTC_COAST_FRICTION_MIN,
+  ZTC_COAST_THRESHOLD_MAX,
+  ZTC_COAST_THRESHOLD_MIN,
   ZtcConfig,
 } from "./ztcConfig";
 
@@ -40,7 +46,13 @@ function patchLayer(
   return { ...cfg, layers };
 }
 
-export function TrackballSettings() {
+/**
+ * @param caps what the connected firmware says it can do, passed down rather
+ *   than read again here (MainPanels has already asked; a second capability read
+ *   would take its turn ahead of this panel's own). Only used to decide whether
+ *   the inertial-scroll section is offered.
+ */
+export function TrackballSettings({ caps }: { caps?: ToraboCaps | null }) {
   const t = useT();
   const { conn } = useContext(ConnectionContext);
   const [cfg, setCfg] = useState<ZtcConfig | null>(null);
@@ -110,7 +122,7 @@ export function TrackballSettings() {
     <div className="p-4 overflow-auto flex flex-col gap-4 h-full">
       <div className="flex flex-col gap-1">
         <h2 className="text-fluid-xl font-bold">
-          トラックボール設定（Bluetooth ライブ編集）
+          トラックボール設定
         </h2>
         <p className="text-sm text-base-content/70">
           ① <b>読み込む</b>で現在値を取得 → ② 表の値を変更 → ③ <b>書き込む</b>
@@ -165,6 +177,24 @@ export function TrackballSettings() {
               />
             </Field>
           </div>
+
+          {/* Inertial scroll. The wire itself is the strongest evidence — a v3
+              blob only comes from firmware that has the engine — so the caps bit
+              only has to cover the case where the descriptor read succeeded but
+              the config read has not happened yet. */}
+          {cfg.hasCoast || hasTrackballCoast(caps ?? null) ? (
+            <CoastCard
+              coast={cfg.coast}
+              onChange={(patch) =>
+                setCfg({ ...cfg, coast: { ...cfg.coast, ...patch } })
+              }
+            />
+          ) : (
+            <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm leading-relaxed text-base-content/80 self-start max-w-2xl">
+              <span className="font-bold">{t("coast.title")}</span>：
+              {t("coast.unavailable")}
+            </div>
+          )}
 
           <details className="rounded-md border border-base-300 bg-base-200/60 px-4 py-3 text-sm leading-relaxed self-start max-w-2xl">
             <summary className="cursor-pointer font-bold text-base select-none">
@@ -281,6 +311,114 @@ export function TrackballSettings() {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Inertial scroll ("coast"), one set for the whole ball — it is a property of
+ * the ball, not of a layer or an axis, so it sits beside the temp-layer card
+ * rather than in the per-layer table.
+ *
+ * friction runs the same way round as the 速度(÷) column: bigger = weaker, i.e.
+ * a shorter glide. The hint spells that out rather than inverting the slider,
+ * so the number on screen is the number on the wire.
+ */
+function CoastCard({
+  coast,
+  onChange,
+}: {
+  coast: CoastCfg;
+  onChange: (patch: Partial<CoastCfg>) => void;
+}) {
+  const t = useT();
+  return (
+    <section className="flex flex-col gap-3 rounded-md border border-base-300 bg-base-200/40 p-4 self-stretch">
+      <h3 className="font-semibold text-base">{t("coast.title")}</h3>
+      <p className="text-sm text-base-content/70">{t("coast.desc")}</p>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          className="checkbox checkbox-sm"
+          aria-label="coast enable"
+          checked={coast.enable}
+          onChange={(e) => onChange({ enable: e.target.checked })}
+        />
+        {t("coast.enable")}
+      </label>
+      <div className="flex flex-wrap gap-6">
+        <div className="flex flex-col gap-1">
+          <SliderField
+            label={t("coast.friction")}
+            value={coast.friction}
+            min={ZTC_COAST_FRICTION_MIN}
+            max={ZTC_COAST_FRICTION_MAX}
+            unit=""
+            disabled={!coast.enable}
+            onChange={(v) => onChange({ friction: v })}
+          />
+          <span className="text-xs text-base-content/60 max-w-xs">
+            {t("coast.frictionHint")}
+          </span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <SliderField
+            label={t("coast.threshold")}
+            value={coast.threshold}
+            min={ZTC_COAST_THRESHOLD_MIN}
+            max={ZTC_COAST_THRESHOLD_MAX}
+            unit={t("coast.thresholdUnit")}
+            disabled={!coast.enable}
+            onChange={(v) => onChange({ threshold: v })}
+          />
+          <span className="text-xs text-base-content/60 max-w-xs">
+            {t("coast.thresholdHint")}
+          </span>
+        </div>
+      </div>
+      <p className="text-xs text-base-content/60">{t("coast.note")}</p>
+    </section>
+  );
+}
+
+/** A labelled range slider with a live numeric readout. Mirrors the timing
+ * panel's control so every slider in the app reads the same. */
+function SliderField({
+  label,
+  value,
+  min,
+  max,
+  unit,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  unit: string;
+  disabled?: boolean;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <Field label={label}>
+      <div className="flex items-center gap-2">
+        <input
+          type="range"
+          className="range range-sm w-48"
+          aria-label={label}
+          min={min}
+          max={max}
+          step={1}
+          value={Math.min(max, Math.max(min, value))}
+          disabled={disabled}
+          onChange={(e) => onChange(Number(e.target.value))}
+        />
+        <span className="font-mono text-sm w-20 text-right tabular-nums">
+          {value}
+          {unit && ` ${unit}`}
+        </span>
+      </div>
+    </Field>
   );
 }
 

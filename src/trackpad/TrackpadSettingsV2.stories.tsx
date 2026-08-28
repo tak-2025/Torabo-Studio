@@ -12,6 +12,7 @@ import {
   TpKind,
   NONE_BIND,
   HID,
+  defaultCoast,
   encodeTp,
   encodeMeta,
 } from "./tpConfigV2";
@@ -83,21 +84,32 @@ function sampleLayers() {
  * shows the labels the app derives from it. */
 const devMeta = (side: TpSide, conn: TpConn, kind: TpKind) => encodeMeta({ side, conn, kind });
 
-/** Default build: peripheral pad on the left half, extender pad on the right. */
+/** One device block. Coasting defaults to off, exactly as the firmware ships it. */
+const device = (
+  deviceId: number,
+  meta: number,
+  coast = defaultCoast(),
+): TpConfig["devices"][number] => ({
+  deviceId,
+  meta,
+  coast,
+  layers: sampleLayers(),
+});
+
+/** Default build: peripheral pad on the left half, extender pad on the right.
+ * hasCoast marks this as a v3 wire, so the 慣性スクロール card is offered — the
+ * left pad has it tuned on, the right one is at the shipped default. */
 const SAMPLE: TpConfig = {
   layerCount: 4,
   hasGestures: true,
+  hasCoast: true,
   devices: [
-    {
-      deviceId: 0,
-      meta: devMeta(TpSide.Left, TpConn.Standard, TpKind.Trackpad),
-      layers: sampleLayers(),
-    },
-    {
-      deviceId: 1,
-      meta: devMeta(TpSide.Right, TpConn.Extension, TpKind.Trackpad),
-      layers: sampleLayers(),
-    },
+    device(0, devMeta(TpSide.Left, TpConn.Standard, TpKind.Trackpad), {
+      enable: true,
+      friction: 5,
+      threshold: 30,
+    }),
+    device(1, devMeta(TpSide.Right, TpConn.Extension, TpKind.Trackpad)),
   ],
 };
 
@@ -105,17 +117,10 @@ const SAMPLE: TpConfig = {
 const SAMPLE_LEFT_EXT: TpConfig = {
   layerCount: 4,
   hasGestures: true,
+  hasCoast: true,
   devices: [
-    {
-      deviceId: 0,
-      meta: devMeta(TpSide.Left, TpConn.Extension, TpKind.Trackpad),
-      layers: sampleLayers(),
-    },
-    {
-      deviceId: 1,
-      meta: devMeta(TpSide.Right, TpConn.Extension, TpKind.Trackpad),
-      layers: sampleLayers(),
-    },
+    device(0, devMeta(TpSide.Left, TpConn.Extension, TpKind.Trackpad)),
+    device(1, devMeta(TpSide.Right, TpConn.Extension, TpKind.Trackpad)),
   ],
 };
 
@@ -123,28 +128,20 @@ const SAMPLE_LEFT_EXT: TpConfig = {
 const SAMPLE_CENTRAL_LEFT: TpConfig = {
   layerCount: 4,
   hasGestures: true,
+  hasCoast: true,
   devices: [
-    {
-      deviceId: 0,
-      meta: devMeta(TpSide.Right, TpConn.Standard, TpKind.Trackpad),
-      layers: sampleLayers(),
-    },
-    {
-      deviceId: 1,
-      meta: devMeta(TpSide.Left, TpConn.Extension, TpKind.Trackpad),
-      layers: sampleLayers(),
-    },
+    device(0, devMeta(TpSide.Right, TpConn.Standard, TpKind.Trackpad)),
+    device(1, devMeta(TpSide.Left, TpConn.Extension, TpKind.Trackpad)),
   ],
 };
 
-/** Firmware older than the meta byte: everything unknown, labels degrade. */
+/** Firmware older than the meta byte: everything unknown, labels degrade. It
+ * also predates the coast block, so that section becomes the update note. */
 const SAMPLE_LEGACY: TpConfig = {
   layerCount: 4,
   hasGestures: true,
-  devices: [
-    { deviceId: 0, meta: 0, layers: sampleLayers() },
-    { deviceId: 1, meta: 0, layers: sampleLayers() },
-  ],
+  hasCoast: false,
+  devices: [device(0, 0), device(1, 0)],
 };
 
 /** Stub the Tauri v2 invoke bridge (window.__TAURI_INTERNALS__.invoke). */

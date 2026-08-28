@@ -142,6 +142,10 @@ export const ledReadConfig = async () => activeBackend().ledReadConfig();
 export const ledWriteConfig = async (d: Uint8Array) =>
   activeBackend().ledWriteConfig(d);
 
+export const timingReadConfig = async () => activeBackend().timingReadConfig();
+export const timingWriteConfig = async (d: Uint8Array) =>
+  activeBackend().timingWriteConfig(d);
+
 export const dmacReadAll = async () => activeBackend().dmacReadAll();
 export const dmacWriteSlot = async (d: Uint8Array) =>
   activeBackend().dmacWriteSlot(d);

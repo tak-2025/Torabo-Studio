@@ -41,7 +41,8 @@ const ja: Dict = {
   "tab.trackpad": "トラックパッド",
   "tab.encoder": "エンコーダ",
   "tab.led": "LED",
-  "tab.trackpadV2": "トラックパッド v2",
+  "tab.timing": "タップ反応",
+  "tab.trackpadV2": "トラックパッド",
   "tab.macros": "マクロ",
   "tab.combos": "コンボ",
   "tab.backup": "バックアップ",
@@ -157,8 +158,37 @@ const ja: Dict = {
     "この画面では、よく使う操作をまとめて再生する「マクロ」を編集します。",
   "preconnect.combos":
     "この画面では、複数のキーの同時押しに 1 つの動作を割り当てる「コンボ」を編集します。",
+  "preconnect.timing":
+    "この画面では、Hold-Tap（mt / lt）の判定時間とキーボードのデバウンス時間を編集します。",
   "preconnect.backup":
     "この画面では、キーボードの設定をファイルに保存したり、ファイルから元に戻したりします。",
+
+  // Timing — どちらの注記を出すかは caps の TimingCap.SplitDebounce で決まる。
+  // 左右どちらが central かに関係なく正しい文言になるよう、半身の呼び名は使わない。
+  "timing.debounce.bothHalves":
+    "左右どちらの半身にも反映されます（設定は接続のたびに中央側からもう一方へ送られます）。",
+  "timing.debounce.centralOnly":
+    "このファームウェアでは中央（central）半身 — このキーボードでは右手側 — のみに反映されます。左半身（split peripheral）のデバウンスには届きません。",
+
+  // 慣性スクロール（coast）— トラックパッド／トラックボール共通。
+  // firmware の caps（TP_COAST / ZTC_COAST）が立っていないときは coast.unavailable。
+  "coast.title": "慣性スクロール",
+  "coast.desc":
+    "スクロールを止めた後も、勢いに応じてしばらく滑り続けます（スマホや実トラックパッドと同じ感触）。スクロール（Scroll）を割り当てた軸にだけ効きます。",
+  "coast.enable": "慣性スクロールを有効にする",
+  "coast.friction": "滑走の長さ",
+  "coast.frictionHint":
+    "小さいほど長く滑ります。1＝数秒 / 8＝標準（約0.8秒）/ 32＝ほぼ即停止。",
+  "coast.threshold": "開始しきい値",
+  "coast.thresholdHint":
+    "この速さより遅い操作では滑りません（単位＝ホイールの刻み／秒）。既定 24。大きくすると、勢いよく弾いたときだけ滑ります。",
+  "coast.thresholdUnit": "刻み/秒",
+  "coast.note":
+    "滑走中に次の操作をすると、その場ですぐ止まります。レイヤーを離れても滑走はそのまま続きます。",
+  "coast.perDevice":
+    "この設定はデバイスごとです（上で選んだデバイスに保存されます）。",
+  "coast.unavailable":
+    "このファームウェアは慣性スクロールに対応していません。使うにはファームウェアの更新が必要です。",
 
   // Post-connect empty states (before the first Read)
   "empty.read": "まず青い「① 読み込む」を押すと、現在の設定が表示されます。",
@@ -190,7 +220,8 @@ const en: Dict = {
   "tab.trackpad": "Trackpad",
   "tab.encoder": "Encoder",
   "tab.led": "LED",
-  "tab.trackpadV2": "Trackpad v2",
+  "tab.timing": "Tap Response",
+  "tab.trackpadV2": "Trackpad",
   "tab.macros": "Macros",
   "tab.combos": "Combos",
   "tab.backup": "Backup",
@@ -295,8 +326,33 @@ const en: Dict = {
     "This screen edits macros — saved sequences that replay several keystrokes at once.",
   "preconnect.combos":
     "This screen edits combos — press several keys at once to trigger a single action.",
+  "preconnect.timing":
+    "This screen edits Hold-Tap (mt / lt) timing and the keyboard's debounce time.",
   "preconnect.backup":
     "This screen saves your keyboard settings to a file and restores them from one.",
+
+  "timing.debounce.bothHalves":
+    "Applies to both halves — the central sends the setting to the other half on every connect.",
+  "timing.debounce.centralOnly":
+    "On this firmware it only applies to the central half — the right-hand side on this keyboard. It does not reach the left half (the split peripheral).",
+
+  "coast.title": "Inertial scroll",
+  "coast.desc":
+    "Scrolling keeps gliding for a moment after you stop, in proportion to how fast you flicked — the way a phone or a real trackpad feels. It only applies to axes set to Scroll.",
+  "coast.enable": "Enable inertial scroll",
+  "coast.friction": "Glide length",
+  "coast.frictionHint":
+    "Smaller glides longer. 1 = several seconds / 8 = default (about 0.8 s) / 32 = stops almost at once.",
+  "coast.threshold": "Start threshold",
+  "coast.thresholdHint":
+    "Slower moves than this never glide (unit: wheel ticks per second). Default 24. Raise it to glide only on a deliberate flick.",
+  "coast.thresholdUnit": "ticks/s",
+  "coast.note":
+    "A glide stops the instant you touch again. It keeps running even after you leave the layer that started it.",
+  "coast.perDevice":
+    "This is a per-device setting — it is saved for the device selected above.",
+  "coast.unavailable":
+    "This firmware does not support inertial scroll. Update the firmware to use it.",
 
   "empty.read": 'Press the blue "① Read" button to load the current settings.',
   "empty.macros": 'Press the blue "Read" button to load your saved macros.',

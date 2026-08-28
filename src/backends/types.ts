@@ -50,6 +50,9 @@ export interface ToraboConfigBackend {
   ledReadConfig(): Promise<Uint8Array>;
   ledWriteConfig(data: Uint8Array): Promise<void>;
 
+  timingReadConfig(): Promise<Uint8Array>;
+  timingWriteConfig(data: Uint8Array): Promise<void>;
+
   /** Macros: read every slot at once, write one slot at a time. */
   dmacReadAll(): Promise<Uint8Array>;
   dmacWriteSlot(data: Uint8Array): Promise<void>;

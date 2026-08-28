@@ -9,6 +9,7 @@ import {
   Archive,
   RotateCw,
   Lightbulb,
+  Timer,
   type LucideIcon,
 } from "lucide-react";
 
@@ -22,6 +23,7 @@ import TrackballSettings from "./trackball/TrackballSettings";
 import TrackpadSettings from "./trackpad/TrackpadSettingsV2";
 import { EncoderSettings } from "./encoder/EncoderSettings";
 import { LedSettings } from "./led/LedSettings";
+import { TimingPanel } from "./timing/TimingPanel";
 import { useToraboCaps } from "./caps/useToraboCaps";
 import { hasConfigAccess } from "./backends";
 import { ConnectionContext } from "./rpc/ConnectionContext";
@@ -38,6 +40,7 @@ type Panel =
   | "trackpad"
   | "encoder"
   | "led"
+  | "timing"
   | "macros"
   | "combos"
   | "backup";
@@ -87,6 +90,13 @@ const TABS: TabDef[] = [
     icon: Lightbulb,
     group: "edit",
     feature: Feature.Led,
+  },
+  {
+    id: "timing",
+    labelKey: "tab.timing",
+    icon: Timer,
+    group: "edit",
+    feature: Feature.Timing,
   },
   {
     id: "macros",
@@ -234,16 +244,19 @@ export function MainPanels() {
         <Keyboard />
       </TabPanel>
       <TabPanel id="trackball" className="min-h-0 flex-1 overflow-hidden">
-        <TrackballSettings />
+        <TrackballSettings caps={caps} />
       </TabPanel>
       <TabPanel id="trackpad" className="min-h-0 flex-1 overflow-hidden">
-        <TrackpadSettings />
+        <TrackpadSettings caps={caps} />
       </TabPanel>
       <TabPanel id="encoder" className="min-h-0 flex-1 overflow-y-auto">
         <EncoderSettings />
       </TabPanel>
       <TabPanel id="led" className="min-h-0 flex-1 overflow-y-auto">
         <LedSettings />
+      </TabPanel>
+      <TabPanel id="timing" className="min-h-0 flex-1 overflow-hidden">
+        <TimingPanel caps={caps} />
       </TabPanel>
       <TabPanel id="macros" className="min-h-0 flex-1 overflow-hidden">
         <MacrosPanel />

@@ -168,7 +168,7 @@ export function MacrosPanel() {
   return (
     <div className="p-4 overflow-auto flex flex-col gap-4 h-full">
       <div className="flex flex-col gap-1">
-        <h2 className="text-fluid-xl font-bold">ダイナミックマクロ（Bluetooth ライブ編集）</h2>
+        <h2 className="text-fluid-xl font-bold">ダイナミックマクロ</h2>
         <p className="text-sm text-base-content/70">
           各スロットに「キーを順に入力する手順」を登録します。keymap 側で{" "}
           <code>&amp;dmac 0</code> 等を置いたキーで再生されます。修飾子チェックは「そのキーを押す間だけ」効きます（例 Ctrl+C）。

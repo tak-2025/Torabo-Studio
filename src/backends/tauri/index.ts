@@ -5,6 +5,7 @@ import { trackballReadConfig, trackballWriteConfig } from "./trackball";
 import { trackpadReadConfig, trackpadWriteConfig } from "./trackpad";
 import { encoderReadConfig, encoderWriteConfig } from "./encoder";
 import { ledReadConfig, ledWriteConfig } from "./led";
+import { timingReadConfig, timingWriteConfig } from "./timing";
 import { dmacReadAll, dmacWriteSlot } from "./dmac";
 import { comboReadAll, comboWriteSlot } from "./combo";
 import { openBackupFile, openKeymapFile, saveTextFile } from "./files";
@@ -26,6 +27,8 @@ export const tauriBackend: ToraboBackend = {
   encoderWriteConfig,
   ledReadConfig,
   ledWriteConfig,
+  timingReadConfig,
+  timingWriteConfig,
   dmacReadAll,
   dmacWriteSlot,
   comboReadAll,

@@ -42,6 +42,7 @@ export const TunnelFeature = {
   Encoder: 0x0d,
   Led: 0x0e,
   LiveFeed: 0x0f,
+  Timing: 0x10,
 } as const;
 export type TunnelFeature = (typeof TunnelFeature)[keyof typeof TunnelFeature];
 
@@ -54,6 +55,7 @@ const FEATURE_LABEL: Record<number, string> = {
   [TunnelFeature.Encoder]: "エンコーダー",
   [TunnelFeature.Led]: "LED",
   [TunnelFeature.LiveFeed]: "ライブ表示",
+  [TunnelFeature.Timing]: "タップ反応",
 };
 
 function label(feature: number): string {
@@ -145,6 +147,9 @@ export function makeRpcConfigBackend(conn: RpcConnection): ToraboConfigBackend {
 
     ledReadConfig: () => read(conn, TunnelFeature.Led),
     ledWriteConfig: (d) => write(conn, TunnelFeature.Led, d),
+
+    timingReadConfig: () => read(conn, TunnelFeature.Timing),
+    timingWriteConfig: (d) => write(conn, TunnelFeature.Timing, d),
 
     // Macros and combos read every slot at once and write one slot at a time;
     // which slot is in the blob's own header, exactly as over GATT.

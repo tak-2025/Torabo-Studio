@@ -7,6 +7,7 @@
 
 import { DM_SLOTS, DM_STEPS } from "../../dynamic_macros/dmacConfig";
 import { CB_SLOTS } from "../../dynamic_combos/comboConfig";
+import { TMG_WIRE_LEN } from "../../timing/timingConfig";
 
 export const RPC_SERVICE = "00000000-0196-6107-c967-c5cfb1c2482a";
 export const RPC_CHAR = "00000001-0196-6107-c967-c5cfb1c2482a";
@@ -74,6 +75,12 @@ export const CONFIG_SERVICES = {
     characteristic: "e1f4ae01-1c2d-4b6e-9f3a-0a1b2c3d4e5f",
     label: "LED config",
     exactLength: null, // 6 + 2 * (1 + rules * ...)
+  },
+  timing: {
+    service: "e1f4b000-1c2d-4b6e-9f3a-0a1b2c3d4e5f",
+    characteristic: "e1f4b001-1c2d-4b6e-9f3a-0a1b2c3d4e5f",
+    label: "timing config",
+    exactLength: TMG_WIRE_LEN, // 8 + 2 * 44 = 96, fixed
   },
 } as const satisfies Record<string, ConfigService>;
 

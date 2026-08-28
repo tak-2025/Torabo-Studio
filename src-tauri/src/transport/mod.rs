@@ -6,6 +6,7 @@ pub mod encoder;
 pub mod gatt;
 pub mod led;
 pub mod serial;
+pub mod timing;
 pub mod trackball;
 pub mod trackpad;
 

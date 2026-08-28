@@ -13,17 +13,30 @@
  * (keycode / consumer usage / layer). The firmware builds the binding at runtime,
  * so any keycode is assignable without a compile-time palette.
  *
- * decode accepts BOTH version 1 (old fixed-role wire) and version 2; encode always
- * emits version 2. Like v1 it is device-/layer-count agnostic: it decodes exactly
- * what the firmware sends and encodes the same shape back. Always Read before Save.
+ * v3 adds ONE inertial-scroll ("coast") parameter set PER DEVICE, carried in the
+ * per-device header (2 B -> 5 B). Nothing else moves: the layer blocks are
+ * byte-for-byte the v2 ones. Coasting is a property of the pad, not of a layer or
+ * an axis, so there is deliberately no per-layer / per-axis coast setting.
+ *
+ * decode accepts version 1 (old fixed-role wire), 2 and 3. encode emits the
+ * version the firmware itself speaks — v3 when the blob we read carried the coast
+ * block, v2 otherwise. The firmware accepts both, but an OLDER firmware accepts
+ * only v2, and an app that always wrote v3 could never write to one again. Like
+ * v1 it is device-/layer-count agnostic: it decodes exactly what the firmware
+ * sends and encodes the same shape back. Always Read before Save.
  */
 
 export const TP_MAGIC = 0x7470; // "tp"
-export const TP_VERSION = 2;
 export const TP_VERSION_V1 = 1;
+export const TP_VERSION_V2 = 2;
+export const TP_VERSION_V3 = 3;
+/** Newest wire this codec speaks (what encode emits for v3-capable firmware). */
+export const TP_VERSION = TP_VERSION_V3;
 
 export const TP_HDR = 6;
-export const TP_DEV_HDR = 2;
+export const TP_DEV_HDR = 2; // v1/v2: device_id, meta
+/** v3 device header: device_id, meta, coast{enable, friction, threshold}. */
+export const TP_DEV_HDR_V3 = 5;
 export const TP_BIND = 4;
 export const TP_AXIS = 11; // role,dir,step + pos(4) + neg(4)
 export const TP_GEST = 16; // tap,tap2,hold,dtap (4 each)
@@ -35,6 +48,23 @@ export const TP_STEP_MAX = 32;
 
 /** header flags */
 export const TP_FLAG_GESTURES = 0x01;
+/** bit1: the per-device coast block is present (v3). Informational only — the
+ * device-header LENGTH is chosen by the version byte, never by this flag, which
+ * is exactly how the firmware parses it. */
+export const TP_FLAG_COAST = 0x02;
+
+/* Inertial scroll ("coast") limits — must match config.h TP_COAST_*.
+ * friction is the per-tick velocity loss in 1/256ths: the coast velocity is
+ * multiplied by (256 - 3*friction)/256 every 20 ms. SMALL = glides for seconds,
+ * LARGE = stops almost at once — the same "bigger is weaker" direction as step.
+ * threshold is the minimum speed that starts a glide, in wheel ticks/second as
+ * the host sees them (i.e. after step is applied). */
+export const TP_COAST_FRICTION_MIN = 1;
+export const TP_COAST_FRICTION_MAX = 32;
+export const TP_COAST_FRICTION_DEFAULT = 8;
+export const TP_COAST_THRESHOLD_MIN = 1;
+export const TP_COAST_THRESHOLD_MAX = 255;
+export const TP_COAST_THRESHOLD_DEFAULT = 24;
 
 /** Axis role (v2). Discrete roles are unified under Encoder. */
 export const TpRole = { Move: 0, Scroll: 1, Off: 2, Encoder: 3 } as const;
@@ -143,10 +173,23 @@ export function describeDevice(deviceId: number, meta: number): string {
   return parts.length ? parts.join(" · ") : `デバイス ${deviceId}`;
 }
 
+/**
+ * Inertial scroll, per device (v3). Only axes set to Scroll ever coast; a new
+ * touch stops a glide at once, and a glide keeps running after the layer that
+ * started it is released — same as a real trackpad.
+ */
+export interface TpCoastCfg {
+  enable: boolean;
+  friction: number; // 1..32 (small = long glide)
+  threshold: number; // 1..255 wheel ticks/s
+}
+
 export interface TpDeviceCfg {
   deviceId: number;
   /** Raw identity byte from the firmware. 0 = unknown (pre-meta firmware). */
   meta: number;
+  /** v3; defaults (disabled) for a v1/v2 wire, which cannot carry it. */
+  coast: TpCoastCfg;
   layers: TpLayerCfg[];
 }
 
@@ -154,12 +197,34 @@ export interface TpConfig {
   devices: TpDeviceCfg[];
   layerCount: number;
   hasGestures: boolean;
+  /** The firmware sent a v3 wire, i.e. it has the coast engine. Drives both the
+   * UI gate and the version encode writes back — see the file header. */
+  hasCoast: boolean;
 }
 
 const clampByte = (v: number) => Math.max(0, Math.min(0xff, Math.trunc(v) || 0));
 const clampU16 = (v: number) => Math.max(0, Math.min(0xffff, Math.trunc(v) || 0));
 const clampStep = (s: number) =>
   Math.max(TP_STEP_MIN, Math.min(TP_STEP_MAX, Math.trunc(s) || TP_STEP_MIN));
+
+/** 0 means "unset" on the wire and becomes the default, never 0 decay. */
+export const clampCoastFriction = (f: number) => {
+  const v = Math.trunc(f) || 0;
+  if (v < TP_COAST_FRICTION_MIN) return TP_COAST_FRICTION_DEFAULT;
+  return Math.min(TP_COAST_FRICTION_MAX, v);
+};
+export const clampCoastThreshold = (t: number) => {
+  const v = Math.trunc(t) || 0;
+  if (v < TP_COAST_THRESHOLD_MIN) return TP_COAST_THRESHOLD_DEFAULT;
+  return Math.min(TP_COAST_THRESHOLD_MAX, v);
+};
+
+/** Coasting off, with the firmware's own defaults parked in the sliders. */
+export const defaultCoast = (): TpCoastCfg => ({
+  enable: false,
+  friction: TP_COAST_FRICTION_DEFAULT,
+  threshold: TP_COAST_THRESHOLD_DEFAULT,
+});
 
 function roleOf(v: number): TpRole {
   return v >= TpRole.Move && v <= TP_ROLE_MAX ? (v as TpRole) : TpRole.Move; // unknown => Move
@@ -203,10 +268,20 @@ export function presetForV1Role(role: number): { pos: TpBinding; neg: TpBinding 
   }
 }
 
-/** Expected total wire length for a version-2 blob. */
-export function tpWireLen(deviceCount: number, layerCount: number, hasGestures: boolean): number {
+/**
+ * Expected total wire length for a v2/v3 blob. v2 and v3 share the layer stride;
+ * only the device header differs, and (as in the firmware) that is chosen by the
+ * version, never by the flags byte.
+ */
+export function tpWireLen(
+  deviceCount: number,
+  layerCount: number,
+  hasGestures: boolean,
+  hasCoast = false,
+): number {
   const stride = TP_AXIS * 2 + (hasGestures ? TP_GEST : 0);
-  return TP_HDR + deviceCount * (TP_DEV_HDR + layerCount * stride);
+  const devHdr = hasCoast ? TP_DEV_HDR_V3 : TP_DEV_HDR;
+  return TP_HDR + deviceCount * (devHdr + layerCount * stride);
 }
 
 /** Expected total wire length for a version-1 blob. */
@@ -231,12 +306,16 @@ export function decodeTp(bytes: Uint8Array): TpConfig {
   if (version === TP_VERSION_V1) {
     return decodeV1(dv, deviceCount, layerCount, bytes.length);
   }
-  if (version !== TP_VERSION) {
-    throw new Error(`Unsupported trackpad config version ${version} (expected ${TP_VERSION})`);
+  if (version !== TP_VERSION_V2 && version !== TP_VERSION_V3) {
+    throw new Error(
+      `Unsupported trackpad config version ${version} (expected ${TP_VERSION_V2} or ${TP_VERSION_V3})`,
+    );
   }
 
   const hasGestures = (flags & TP_FLAG_GESTURES) !== 0;
-  const expected = tpWireLen(deviceCount, layerCount, hasGestures);
+  const hasCoast = version === TP_VERSION_V3;
+  const devHdr = hasCoast ? TP_DEV_HDR_V3 : TP_DEV_HDR;
+  const expected = tpWireLen(deviceCount, layerCount, hasGestures, hasCoast);
   if (bytes.length !== expected) {
     throw new Error(`Bad trackpad config length ${bytes.length} (expected ${expected})`);
   }
@@ -259,7 +338,14 @@ export function decodeTp(bytes: Uint8Array): TpConfig {
   for (let d = 0; d < deviceCount; d++) {
     const deviceId = dv.getUint8(o);
     const meta = dv.getUint8(o + 1); // 0 on firmware that predates the meta byte
-    o += TP_DEV_HDR;
+    const coast: TpCoastCfg = hasCoast
+      ? {
+          enable: dv.getUint8(o + 2) !== 0,
+          friction: clampCoastFriction(dv.getUint8(o + 3)),
+          threshold: clampCoastThreshold(dv.getUint8(o + 4)),
+        }
+      : defaultCoast();
+    o += devHdr;
     const layers: TpLayerCfg[] = [];
     for (let i = 0; i < layerCount; i++) {
       const x = readAxis(o);
@@ -279,9 +365,9 @@ export function decodeTp(bytes: Uint8Array): TpConfig {
       }
       layers.push({ x, y, gestures });
     }
-    devices.push({ deviceId, meta, layers });
+    devices.push({ deviceId, meta, coast, layers });
   }
-  return { devices, layerCount, hasGestures };
+  return { devices, layerCount, hasGestures, hasCoast };
 }
 
 /** Decode a legacy v1 blob, upgrading fixed roles to the v2 model. */
@@ -325,21 +411,29 @@ function decodeV1(
       o += TP_LAYER_V1;
       layers.push({ x, y, gestures: emptyGestures() });
     }
-    devices.push({ deviceId, meta, layers });
+    devices.push({ deviceId, meta, coast: defaultCoast(), layers });
   }
-  // Upgraded configs are now gesture-capable; re-save as full v2.
-  return { devices, layerCount, hasGestures: true };
+  // Upgraded configs are now gesture-capable; re-save as full v2. hasCoast stays
+  // false: a firmware still speaking v1 has no coast engine to configure.
+  return { devices, layerCount, hasGestures: true, hasCoast: false };
 }
 
 export function encodeTp(cfg: TpConfig): Uint8Array {
   const deviceCount = cfg.devices.length;
-  const buf = new Uint8Array(tpWireLen(deviceCount, cfg.layerCount, cfg.hasGestures));
+  // Answer in the version we were spoken to. Writing v3 at a firmware that only
+  // knows v2 would be rejected outright, and there is nothing to gain from it:
+  // a v2 firmware has no coast engine for the extra bytes to reach.
+  const hasCoast = !!cfg.hasCoast;
+  const buf = new Uint8Array(tpWireLen(deviceCount, cfg.layerCount, cfg.hasGestures, hasCoast));
   const dv = new DataView(buf.buffer);
   dv.setUint16(0, TP_MAGIC, true);
-  dv.setUint8(2, TP_VERSION);
+  dv.setUint8(2, hasCoast ? TP_VERSION_V3 : TP_VERSION_V2);
   dv.setUint8(3, deviceCount & 0xff);
   dv.setUint8(4, cfg.layerCount & 0xff);
-  dv.setUint8(5, cfg.hasGestures ? TP_FLAG_GESTURES : 0);
+  dv.setUint8(
+    5,
+    (cfg.hasGestures ? TP_FLAG_GESTURES : 0) | (hasCoast ? TP_FLAG_COAST : 0),
+  );
 
   const writeBind = (o: number, b: TpBinding) => {
     dv.setUint8(o, behaviorOf(b.behavior));
@@ -368,7 +462,15 @@ export function encodeTp(cfg: TpConfig): Uint8Array {
     // Echo the identity back for a faithful round-trip. The firmware ignores it
     // on write and re-derives it from its own build config, so we can't corrupt it.
     dv.setUint8(o + 1, (dev.meta ?? 0) & 0xff);
-    o += TP_DEV_HDR;
+    if (hasCoast) {
+      const c = dev.coast ?? defaultCoast();
+      dv.setUint8(o + 2, c.enable ? 1 : 0);
+      dv.setUint8(o + 3, clampCoastFriction(c.friction));
+      dv.setUint8(o + 4, clampCoastThreshold(c.threshold));
+      o += TP_DEV_HDR_V3;
+    } else {
+      o += TP_DEV_HDR;
+    }
     for (let i = 0; i < cfg.layerCount; i++) {
       const l = dev.layers[i] ?? { x: defAxis(), y: defAxis(), gestures: emptyGestures() };
       writeAxis(o, l.x);

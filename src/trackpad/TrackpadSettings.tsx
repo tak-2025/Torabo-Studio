@@ -106,7 +106,7 @@ export function TrackpadSettings() {
   return (
     <div className="p-4 overflow-auto flex flex-col gap-4 h-full">
       <div className="flex flex-col gap-1">
-        <h2 className="text-fluid-xl font-bold">トラックパッド設定（Bluetooth ライブ編集）</h2>
+        <h2 className="text-fluid-xl font-bold">トラックパッド設定</h2>
         <p className="text-sm text-base-content/70">
           ① <b>読み込む</b>で現在値を取得 → ② デバイスとモード（レイヤー）ごとの機能を変更 → ③{" "}
           <b>書き込む</b>で即反映＆本体に保存

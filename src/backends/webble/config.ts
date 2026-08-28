@@ -102,6 +102,9 @@ export function makeConfigBackend(
     ledReadConfig: () => read("led"),
     ledWriteConfig: (d) => write("led", d),
 
+    timingReadConfig: () => read("timing"),
+    timingWriteConfig: (d) => write("timing", d),
+
     dmacReadAll: () => read("macros"),
     dmacWriteSlot: (d) => write("macros", d),
 

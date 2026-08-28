@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { TrackballSettings } from "./TrackballSettings";
 import { ConnectionContext } from "../rpc/ConnectionContext";
 import { keymapLayersResponse, mockRpcConnection } from "../rpc/mockConnection";
-import { Role, ZtcConfig, encodeZtc } from "./ztcConfig";
+import { Role, ZtcConfig, defaultCoast, encodeZtc } from "./ztcConfig";
 
 /**
  * The trackball panel without a ball: the Tauri bridge is stubbed so ① 読み込む
@@ -26,6 +26,9 @@ const axis = (role: Role, speedDiv: number, reverse = false) => ({
 const SAMPLE: ZtcConfig = {
   tempTarget: 3,
   tempTimeoutMs: 800,
+  // v3 firmware: the 慣性スクロール card is offered, switched on and tuned.
+  hasCoast: true,
+  coast: { enable: true, friction: 6, threshold: 30 },
   layers: [
     { x: axis(Role.Move, 1), y: axis(Role.Move, 1), tempEnable: true },
     { x: axis(Role.Scroll, 8, true), y: axis(Role.Scroll, 8), tempEnable: false },
@@ -72,3 +75,11 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Loaded: Story = { decorators: [withConfig(SAMPLE)] };
+
+/** Firmware older than the coast trailer (v2 wire): the card is replaced by the
+ * "update the firmware" note, and Save answers in v2 so the write still lands. */
+export const NoCoastFirmware: Story = {
+  decorators: [
+    withConfig({ ...SAMPLE, hasCoast: false, coast: defaultCoast() }),
+  ],
+};

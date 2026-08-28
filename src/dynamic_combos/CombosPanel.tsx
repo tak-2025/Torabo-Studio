@@ -140,7 +140,7 @@ export function CombosPanel() {
     <div className="p-4 overflow-auto flex flex-col gap-4 h-full">
       <div className="flex flex-col gap-1">
         <h2 className="text-fluid-xl font-bold">
-          ダイナミックコンボ（Bluetooth ライブ編集）
+          ダイナミックコンボ
         </h2>
         <p className="text-sm text-base-content/70">
           複数のキー位置を同時押しすると 1

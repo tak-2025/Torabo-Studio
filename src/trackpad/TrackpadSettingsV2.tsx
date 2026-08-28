@@ -27,14 +27,20 @@ import { HidUsagePicker } from "../behaviors/HidUsagePicker";
 import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
 import { useLocalStorageState } from "../misc/useLocalStorageState";
 import { useT } from "../i18n";
+import { ToraboCaps, hasTrackpadCoast } from "../caps/toraboCaps";
 import {
   TpAxisCfg,
   TpBinding,
+  TpCoastCfg,
   TpConfig,
   TpGestures,
   TpRole,
   TpBehavior,
   NONE_BIND,
+  TP_COAST_FRICTION_MAX,
+  TP_COAST_FRICTION_MIN,
+  TP_COAST_THRESHOLD_MAX,
+  TP_COAST_THRESHOLD_MIN,
   presetForV1Role,
   decodeTp,
   encodeTp,
@@ -236,7 +242,25 @@ function patchGesture(
   return { ...cfg, devices };
 }
 
-export function TrackpadSettingsV2() {
+/** Immutably patch one device's inertial-scroll settings. */
+function patchCoast(
+  cfg: TpConfig,
+  dev: number,
+  patch: Partial<TpCoastCfg>,
+): TpConfig {
+  const devices = cfg.devices.map((d, di) =>
+    di === dev ? { ...d, coast: { ...d.coast, ...patch } } : d,
+  );
+  return { ...cfg, devices };
+}
+
+/**
+ * @param caps what the connected firmware says it can do, passed down rather
+ *   than read again here (MainPanels has already asked; a second capability read
+ *   would take its turn ahead of this panel's own). Only used to decide whether
+ *   the inertial-scroll section is offered.
+ */
+export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
   const t = useT();
   const { conn } = useContext(ConnectionContext);
   const [cfg, setCfg] = useState<TpConfig | null>(null);
@@ -343,7 +367,7 @@ export function TrackpadSettingsV2() {
     <div className="p-4 overflow-auto flex flex-col gap-4 h-full">
       <div className="flex flex-col gap-1">
         <h2 className="text-fluid-xl font-bold">
-          トラックパッド設定 v2（Bluetooth ライブ編集）
+          トラックパッド設定
         </h2>
         <p className="text-sm text-base-content/70">
           ① <b>読み込む</b>で現在値を取得 → ②
@@ -655,6 +679,22 @@ export function TrackpadSettingsV2() {
             </>
           )}
 
+          {/* Inertial scroll, per device. The wire itself is the strongest
+              evidence — a v3 blob only comes from firmware that has the engine —
+              so the caps bit only has to cover the case where the descriptor read
+              succeeded but the config read has not happened yet. */}
+          {cfg.hasCoast || hasTrackpadCoast(caps ?? null) ? (
+            <CoastCard
+              coast={device.coast}
+              onChange={(patch) => setCfg(patchCoast(cfg, dev, patch))}
+            />
+          ) : (
+            <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm leading-relaxed text-base-content/80 self-start max-w-3xl">
+              <span className="font-bold">{t("coast.title")}</span>：
+              {t("coast.unavailable")}
+            </div>
+          )}
+
           {cfg.hasGestures && (
             <GesturesCard
               device={device}
@@ -822,6 +862,116 @@ function EncoderDetailRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+/**
+ * Inertial scroll ("coast") for the selected device. One set per device — it is
+ * a property of the pad, not of a layer or an axis — so it lives outside the
+ * per-layer table and follows the デバイス dropdown.
+ *
+ * friction runs the same way round as the 速さ・感度(step) column: bigger =
+ * weaker, i.e. a shorter glide. The hint spells that out rather than inverting
+ * the slider, so the number on screen is the number on the wire.
+ */
+function CoastCard({
+  coast,
+  onChange,
+}: {
+  coast: TpCoastCfg;
+  onChange: (patch: Partial<TpCoastCfg>) => void;
+}) {
+  const t = useT();
+  return (
+    <section className="rounded-md border border-base-300 bg-base-200/40 p-4 self-stretch flex flex-col gap-3">
+      <h3 className="text-base font-bold">{t("coast.title")}</h3>
+      <p className="text-sm text-base-content/70">{t("coast.desc")}</p>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          className="checkbox checkbox-sm"
+          aria-label="coast enable"
+          checked={coast.enable}
+          onChange={(e) => onChange({ enable: e.target.checked })}
+        />
+        {t("coast.enable")}
+      </label>
+      <div className="flex flex-wrap gap-6">
+        <div className="flex flex-col gap-1">
+          <SliderField
+            label={t("coast.friction")}
+            value={coast.friction}
+            min={TP_COAST_FRICTION_MIN}
+            max={TP_COAST_FRICTION_MAX}
+            unit=""
+            disabled={!coast.enable}
+            onChange={(v) => onChange({ friction: v })}
+          />
+          <span className="text-xs text-base-content/60 max-w-xs">
+            {t("coast.frictionHint")}
+          </span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <SliderField
+            label={t("coast.threshold")}
+            value={coast.threshold}
+            min={TP_COAST_THRESHOLD_MIN}
+            max={TP_COAST_THRESHOLD_MAX}
+            unit={t("coast.thresholdUnit")}
+            disabled={!coast.enable}
+            onChange={(v) => onChange({ threshold: v })}
+          />
+          <span className="text-xs text-base-content/60 max-w-xs">
+            {t("coast.thresholdHint")}
+          </span>
+        </div>
+      </div>
+      <p className="text-xs text-base-content/60">
+        {t("coast.note")} {t("coast.perDevice")}
+      </p>
+    </section>
+  );
+}
+
+/** A labelled range slider with a live numeric readout. Mirrors the timing
+ * panel's control so every slider in the app reads the same. */
+function SliderField({
+  label,
+  value,
+  min,
+  max,
+  unit,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  unit: string;
+  disabled?: boolean;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <Field label={label}>
+      <div className="flex items-center gap-2">
+        <input
+          type="range"
+          className="range range-sm w-48"
+          aria-label={label}
+          min={min}
+          max={max}
+          step={1}
+          value={Math.min(max, Math.max(min, value))}
+          disabled={disabled}
+          onChange={(e) => onChange(Number(e.target.value))}
+        />
+        <span className="font-mono text-sm w-20 text-right tabular-nums">
+          {value}
+          {unit && ` ${unit}`}
+        </span>
+      </div>
+    </Field>
   );
 }
 

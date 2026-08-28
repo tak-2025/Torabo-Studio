@@ -34,19 +34,36 @@ export const Feature = {
   Encoder: 5,
   Led: 6,
   ReservedLayers: 7,
+  Timing: 10,
 } as const;
 export type Feature = (typeof Feature)[keyof typeof Feature];
 
 /** Per-feature capability bits. Meaning is feature-specific. */
 export const LedCap = { Left: 0x0001, Right: 0x0002, CentralIsLeft: 0x0004 } as const;
 
+/** Timing: SplitDebounce = the debounce windows are carried across the split link,
+ * so they apply to BOTH halves' key scanning. Without it they only reach the
+ * central's, which is all the firmware could do before — same wire either way, so
+ * this is a capability bit rather than a wire version. */
+export const TimingCap = { SplitDebounce: 0x0001 } as const;
+
+/** Trackpad: Coast = this firmware has the per-device inertial-scroll engine and
+ * its wire (v3) carries the three coast bytes per device. The low 4 bits of the
+ * trackpad caps word are a device mask, so this bit starts at bit4. */
+export const TrackpadCap = { Coast: 0x0010 } as const;
+
+/** Trackball: Coast = inertial scroll for the ball (the v3 wire trailer). */
+export const TrackballCap = { Coast: 0x0001 } as const;
+
 /** The wire versions THIS app knows how to speak. If the firmware reports a higher
  * one, its config has fields we'd drop on write — so we refuse to write rather than
  * silently damage it, and tell the user to update the app. */
 export const SUPPORTED_WIRE: Partial<Record<Feature, number>> = {
-  [Feature.Trackpad]: 2,
+  [Feature.Trackball]: 3,
+  [Feature.Trackpad]: 3,
   [Feature.Encoder]: 1,
   [Feature.Led]: 1,
+  [Feature.Timing]: 1,
 };
 
 export interface FeatureInfo {
@@ -121,6 +138,32 @@ export function fwVersionString(caps: ToraboCaps | null): string {
   if (!caps) return "不明（この機能を持たない古いファームウェア）";
   const { major, minor, patch } = caps.fw;
   return `${major}.${minor}.${patch}`;
+}
+
+/** Does this firmware push the debounce windows to the peripheral half too?
+ *
+ * Answers false for pre-capabilities firmware, which is right: it predates the
+ * split propagation entirely. Only used to word a note, never to hide anything. */
+export function hasSplitDebounce(caps: ToraboCaps | null): boolean {
+  const f = featureInfo(caps, Feature.Timing);
+  return !!f && (f.caps & TimingCap.SplitDebounce) !== 0;
+}
+
+/** Does this firmware have the trackpad's inertial-scroll ("coast") engine?
+ *
+ * Answers false for pre-capabilities firmware, which is right: it predates the
+ * feature entirely. The panel ORs this with what the wire itself said (a v3 blob
+ * proves the engine is there), so a keyboard whose descriptor read failed still
+ * gets the section rather than losing a setting it can actually apply. */
+export function hasTrackpadCoast(caps: ToraboCaps | null): boolean {
+  const f = featureInfo(caps, Feature.Trackpad);
+  return !!f && (f.caps & TrackpadCap.Coast) !== 0;
+}
+
+/** Same question for the trackball. */
+export function hasTrackballCoast(caps: ToraboCaps | null): boolean {
+  const f = featureInfo(caps, Feature.Trackball);
+  return !!f && (f.caps & TrackballCap.Coast) !== 0;
 }
 
 /** Which halves actually have an LED. Empty => hide the LED tab entirely. */

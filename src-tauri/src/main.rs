@@ -18,6 +18,7 @@ use transport::trackball::{trackball_read_config, trackball_write_config};
 use transport::caps::torabo_read_caps;
 use transport::encoder::{encoder_read_config, encoder_write_config};
 use transport::led::{led_read_config, led_write_config};
+use transport::timing::{timing_read_config, timing_write_config};
 use transport::trackpad::{trackpad_read_config, trackpad_write_config};
 use transport::dmac::{dmac_read_all, dmac_write_slot};
 use transport::combo::{combo_read_all, combo_write_slot};
@@ -46,6 +47,8 @@ fn main() {
             encoder_write_config,
             led_read_config,
             led_write_config,
+            timing_read_config,
+            timing_write_config,
             torabo_read_caps,
             dmac_read_all,
             dmac_write_slot,
