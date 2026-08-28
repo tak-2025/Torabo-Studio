@@ -176,7 +176,7 @@ function PositionPicker({
         </span>
       </div>
       {showPicker && layoutPositions && (
-        <div className="border border-base-300 rounded bg-base-200/50 h-64 overflow-hidden">
+        <div className="border border-base-300 rounded bg-base-200/50 h-64 overflow-hidden grid items-center justify-center">
           <PhysicalLayout
             positions={layoutPositions}
             oneU={38}

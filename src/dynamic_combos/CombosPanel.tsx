@@ -314,7 +314,7 @@ function ComboEditor({
 
           {/* visual layout picker: click a key to toggle it into the combo */}
           {showPicker && layoutPositions && (
-            <div className="border border-base-300 rounded bg-base-200/50 h-72 overflow-hidden">
+            <div className="border border-base-300 rounded bg-base-200/50 h-72 overflow-hidden grid items-center justify-center">
               <PhysicalLayout
                 positions={layoutPositions}
                 oneU={42}
