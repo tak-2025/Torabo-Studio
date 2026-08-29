@@ -255,6 +255,46 @@ async function setupToraboAccess(
   return teardown;
 }
 
+// How many times to ask for `getDeviceInfo` right after a fresh connection,
+// and how long to give each attempt. A BLE reconnect (as opposed to the very
+// first connection to a device) has to redo service discovery and
+// resubscribe to notifications on the OS side, and the firmware needs a
+// moment to be ready to answer — that can comfortably take longer than 1s,
+// especially the first attempt right after the link comes up. A single 1s
+// race was tuned for the fast common case and made every slow-but-fine
+// reconnect look like a failure, so this gives each attempt a realistic
+// budget and retries a couple of times (with a short pause in between)
+// before finally giving up.
+const GET_DEVICE_INFO_ATTEMPTS = 3;
+const GET_DEVICE_INFO_TIMEOUT_MS = 5000;
+const GET_DEVICE_INFO_RETRY_DELAY_MS = 500;
+
+async function getDeviceInfoWithRetries(conn: RpcConnection) {
+  for (let attempt = 1; attempt <= GET_DEVICE_INFO_ATTEMPTS; attempt++) {
+    const details = await Promise.race([
+      call_rpc(conn, { core: { getDeviceInfo: true } })
+        .then((r) => r?.core?.getDeviceInfo)
+        .catch((e) => {
+          console.error("Failed first RPC call", e);
+          return undefined;
+        }),
+      valueAfter(undefined, GET_DEVICE_INFO_TIMEOUT_MS),
+    ]);
+
+    if (details) return details;
+
+    console.warn(
+      `getDeviceInfo attempt ${attempt}/${GET_DEVICE_INFO_ATTEMPTS} timed out or failed`,
+    );
+
+    if (attempt < GET_DEVICE_INFO_ATTEMPTS) {
+      await valueAfter(undefined, GET_DEVICE_INFO_RETRY_DELAY_MS);
+    }
+  }
+
+  return undefined;
+}
+
 async function connect(
   transport: RpcTransport,
   setConn: Dispatch<ConnectionState>,
@@ -263,15 +303,7 @@ async function connect(
 ) {
   let conn = await create_rpc_connection(transport, { signal });
 
-  let details = await Promise.race([
-    call_rpc(conn, { core: { getDeviceInfo: true } })
-      .then((r) => r?.core?.getDeviceInfo)
-      .catch((e) => {
-        console.error("Failed first RPC call", e);
-        return undefined;
-      }),
-    valueAfter(undefined, 1000),
-  ]);
+  let details = await getDeviceInfoWithRetries(conn);
 
   if (!details) {
     // TODO: Show a proper toast/alert not using `window.alert`
