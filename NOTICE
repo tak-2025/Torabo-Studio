@@ -34,3 +34,9 @@ Changes made in this fork relative to the upstream ZMK Studio include:
   - Backup/restore, including keymap.keymap export
   - Japanese / English UI (i18n)
   - Native BLE/serial transport additions in the Tauri backend
+  - Tap Response tab (Hold-Tap tapping-term/flavor/quick-tap/require-prior-idle/
+    positional settings and kscan debounce, live-edited over BLE/USB)
+  - Inertial scroll ("coast") for the trackball and trackpad, per device
+  - RPC tunnel subsystem carrying the torabo settings over USB (in addition to
+    BLE), for firmware that supports it
+  - Browser build (Web Bluetooth / Web Serial), published via GitHub Pages

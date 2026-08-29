@@ -111,7 +111,7 @@ const ja: Dict = {
 
   // About modal
   "about.intro":
-    "Torabo Studio は ZMK Studio（Apache-2.0）の非公式フォークで、ZMK プロジェクトとは提携・承認関係にありません。torabo-tsuki キーボード向けにトラックボール設定タブとバックアップ機能を追加しています。",
+    "Torabo Studio は ZMK Studio（Apache-2.0）の非公式フォークで、ZMK プロジェクトとは提携・承認関係にありません。torabo-tsuki キーボード向けに、トラックボール・トラックパッド・エンコーダ・LED・タップ反応の各設定タブとバックアップ機能、日本語 UI を追加し、BLE / USB のどちらでもライブ編集できます。",
   "about.thanks":
     "ZMK Studio は、コントリビューターの皆さんによる時間の寄付と、以下のベンダーによる資金面でのスポンサーシップによって実現しています:",
 
@@ -291,7 +291,7 @@ const en: Dict = {
   "unlock.body2Post": " documentation for more information.",
 
   "about.intro":
-    "Torabo Studio is an unofficial fork of ZMK Studio (Apache-2.0), not affiliated with or endorsed by the ZMK Project. It adds a Trackball settings tab and backup features for the torabo-tsuki keyboard.",
+    "Torabo Studio is an unofficial fork of ZMK Studio (Apache-2.0), not affiliated with or endorsed by the ZMK Project. It adds Trackball, Trackpad, Encoder, LED and Tap Response settings tabs, backup features, and a Japanese UI for the torabo-tsuki keyboard, live-editable over BLE or USB.",
   "about.thanks":
     "ZMK Studio is made possible thanks to the generous donation of time from our contributors, as well as the financial sponsorship from the following vendors:",
 

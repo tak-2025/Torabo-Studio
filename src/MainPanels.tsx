@@ -166,8 +166,10 @@ export function MainPanels() {
   // so we show everything rather than hide a tab we simply couldn't ask about.
   const { caps } = useToraboCaps();
 
-  // The config services are GATT-only, so a browser talking Web Serial has the
-  // keymap and nothing else — those tabs could only fail there, so they go away.
+  // The config services need either the GATT backend or a working RPC tunnel
+  // (setupToraboAccess in App.tsx). A connection that has neither — USB/serial
+  // to firmware that predates torabo-rpc-tunnel — has the keymap and nothing
+  // else, so those tabs could only fail there and go away.
   // Only once connected, though: before that every panel shows its own "connect
   // first" note, and hiding them would take away the one hint of what this
   // keyboard can do. The backup tab always stays — it degrades section by

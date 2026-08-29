@@ -27,7 +27,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "longDescription": "An unofficial ZMK Studio fork for the torabo-tsuki keyboard. Adds tabs to live-edit trackball, trackpad, macros, combos, encoder and LED settings over BLE without reflashing.",
+    "longDescription": "An unofficial ZMK Studio fork for the torabo-tsuki keyboard. Adds tabs to live-edit trackball, trackpad, macros, combos, encoder, LED and timing (Hold-Tap/debounce) settings over BLE or USB without reflashing.",
     "macOS": {
       "entitlements": null,
       "exceptionDomain": "",
@@ -36,7 +36,7 @@
       "signingIdentity": "-"
     },
     "resources": [],
-    "shortDescription": "Live BLE editor for torabo-tsuki (ZMK Studio fork).",
+    "shortDescription": "Live BLE/USB editor for torabo-tsuki (ZMK Studio fork).",
     "targets": "all",
     "windows": {}
   },
