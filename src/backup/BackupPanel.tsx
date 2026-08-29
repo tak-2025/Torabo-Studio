@@ -8,12 +8,20 @@ import { SetLayerBindingResponse } from "@zmkfirmware/zmk-studio-ts-client/keyma
 import { call_rpc } from "../rpc/logging";
 import { StatusBadge, PanelStatus } from "../misc/PanelActionBar";
 import { useT } from "../i18n";
+import { useToraboCaps } from "../caps/useToraboCaps";
+import { Feature, hasFeature, ledSides } from "../caps/toraboCaps";
 
 import {
   trackballReadConfig,
   trackballWriteConfig,
   trackpadReadConfig,
   trackpadWriteConfig,
+  encoderReadConfig,
+  encoderWriteConfig,
+  ledReadConfig,
+  ledWriteConfig,
+  timingReadConfig,
+  timingWriteConfig,
   dmacReadAll,
   dmacWriteSlot,
   comboReadAll,
@@ -297,10 +305,24 @@ async function restoreKeymap(
   return r;
 }
 
+/**
+ * Whether the LED tab would actually be shown for this keyboard — same rule as
+ * MainPanels' tab visibility: unknown caps (pre-capabilities firmware) means
+ * "don't hide it", known caps means only when at least one side really has an
+ * LED (the module can be compiled in while the anode has no power rail).
+ */
+function ledFeatureAvailable(caps: ReturnType<typeof useToraboCaps>["caps"]): boolean {
+  if (!hasFeature(caps, Feature.Led)) return false;
+  if (!caps) return true;
+  const { left, right } = ledSides(caps);
+  return left || right;
+}
+
 export function BackupPanel() {
   const t = useT();
   const { conn } = useContext(ConnectionContext);
   const lockState = useContext(LockStateContext);
+  const { caps } = useToraboCaps();
   const [status, setStatus] = useState<Status>({ kind: "idle" });
 
   const busy = status.kind === "busy";
@@ -345,6 +367,38 @@ export function BackupPanel() {
         console.warn("trackpad read skipped:", e);
       }
 
+      // --- encoder (only when the firmware's caps say the feature exists;
+      //     same gating as the tab in MainPanels.tsx) ---
+      let encoder: BackupFile["encoder"] = null;
+      if (hasFeature(caps, Feature.Encoder)) {
+        try {
+          encoder = { wireBase64: bytesToBase64(await encoderReadConfig()) };
+        } catch (e) {
+          console.warn("encoder read skipped:", e);
+        }
+      }
+
+      // --- led (gated like the LED tab: feature present AND at least one
+      //     side actually has an LED) ---
+      let led: BackupFile["led"] = null;
+      if (ledFeatureAvailable(caps)) {
+        try {
+          led = { wireBase64: bytesToBase64(await ledReadConfig()) };
+        } catch (e) {
+          console.warn("led read skipped:", e);
+        }
+      }
+
+      // --- timing (hold-tap + debounce) ---
+      let timing: BackupFile["timing"] = null;
+      if (hasFeature(caps, Feature.Timing)) {
+        try {
+          timing = { wireBase64: bytesToBase64(await timingReadConfig()) };
+        } catch (e) {
+          console.warn("timing read skipped:", e);
+        }
+      }
+
       // --- keymap ---
       let keymap: BackupFile["keymap"] = null;
       const km = (await call_rpc(conn, { keymap: { getKeymap: true } }))?.keymap
@@ -373,7 +427,16 @@ export function BackupPanel() {
         }
       }
 
-      if (!trackball && !keymap && !macros && !combos && !trackpad) {
+      if (
+        !trackball &&
+        !keymap &&
+        !macros &&
+        !combos &&
+        !trackpad &&
+        !encoder &&
+        !led &&
+        !timing
+      ) {
         throw new Error("取得できる設定がありませんでした。");
       }
 
@@ -387,6 +450,9 @@ export function BackupPanel() {
         combos,
         trackpad,
         behaviors,
+        timing,
+        encoder,
+        led,
       };
       const stamp = file.exportedAt.replace(/[:T]/g, "-").slice(0, 19);
       const saved = await saveTextFile(
@@ -401,6 +467,9 @@ export function BackupPanel() {
       const parts = [
         trackball ? "トラックボール設定" : null,
         trackpad ? "トラックパッド設定" : null,
+        encoder ? "エンコーダー設定" : null,
+        led ? "LED設定" : null,
+        timing ? "タップ反応設定" : null,
         keymap
           ? `キーマップ ${keymap.layers.length} レイヤー${
               behaviors ? "（ビヘイビア名付き）" : "（名前表なし: 他機に復元不可）"
@@ -416,7 +485,7 @@ export function BackupPanel() {
     } catch (e) {
       setStatus({ kind: "error", msg: t("status.error") + String(e) });
     }
-  }, [conn, t]);
+  }, [conn, caps, t]);
 
   const onExportKeymap = useCallback(async () => {
     if (!conn) {
@@ -621,6 +690,42 @@ export function BackupPanel() {
         return "トラックパッド設定";
       });
 
+      // 1c) encoder (v5+; absent in older backups, or skipped when this
+      //     keyboard's firmware wasn't built with the feature)
+      await section("エンコーダー設定", async () => {
+        if (!file.encoder?.wireBase64) return null;
+        if (!hasFeature(caps, Feature.Encoder)) {
+          skipped.push(
+            "エンコーダー設定（このキーボードにはエンコーダー機能がありません）"
+          );
+          return null;
+        }
+        await encoderWriteConfig(base64ToBytes(file.encoder.wireBase64));
+        return "エンコーダー設定";
+      });
+
+      // 1d) led (v5+; same "does this keyboard actually have one" gate as the tab)
+      await section("LED設定", async () => {
+        if (!file.led?.wireBase64) return null;
+        if (!ledFeatureAvailable(caps)) {
+          skipped.push("LED設定（このキーボードにはLED機能がありません）");
+          return null;
+        }
+        await ledWriteConfig(base64ToBytes(file.led.wireBase64));
+        return "LED設定";
+      });
+
+      // 1e) timing (v5+; hold-tap timing + debounce)
+      await section("タップ反応設定", async () => {
+        if (!file.timing?.wireBase64) return null;
+        if (!hasFeature(caps, Feature.Timing)) {
+          skipped.push("タップ反応設定（このキーボードにはこの機能がありません）");
+          return null;
+        }
+        await timingWriteConfig(base64ToBytes(file.timing.wireBase64));
+        return "タップ反応設定";
+      });
+
       // 2) macros (per-slot write; restores every slot incl. cleared ones)
       await section("マクロ", async () => {
         if (!file.macros?.wireBase64) return null;
@@ -744,7 +849,7 @@ export function BackupPanel() {
     } catch (e) {
       setStatus({ kind: "error", msg: t("status.error") + String(e) });
     }
-  }, [conn, lockState, t]);
+  }, [conn, lockState, caps, t]);
 
   if (!conn) {
     return (
@@ -759,7 +864,7 @@ export function BackupPanel() {
       <div className="flex flex-col gap-1">
         <h2 className="text-fluid-xl font-bold">バックアップ（設定の保存・復元）</h2>
         <p className="text-sm text-base-content/70">
-          トラックボール設定・トラックパッド設定・マクロ・コンボ・キーマップを1つのファイル（.json）に保存／復元します。
+          トラックボール設定・トラックパッド設定・エンコーダー設定・LED設定・タップ反応設定・マクロ・コンボ・キーマップを1つのファイル（.json）に保存／復元します。
           ZMK での編集で設定が崩れても、ここから元に戻せます。
         </p>
       </div>
@@ -824,7 +929,10 @@ export function BackupPanel() {
             — 今のキーボードにあるレイヤーだけを先頭から順に同期し、はみ出した分はスキップします（スキップ内容は結果に表示）。
           </li>
           <li>
-            トラックボール／トラックパッド／マクロ／コンボ／キーマップは<b>それぞれ独立して復元</b>します。古いファームのバックアップでどれかが読めなくても、残りはそのまま復元されます。
+            トラックボール／トラックパッド／エンコーダー／LED／タップ反応／マクロ／コンボ／キーマップは<b>それぞれ独立して復元</b>します。古いファームのバックアップでどれかが読めなくても、残りはそのまま復元されます。
+          </li>
+          <li>
+            エンコーダー・LED・タップ反応の設定は<b>その機能を持つファームウェアでのみ</b>保存・復元されます（v5以降）。無い機種向けのファイルを読み込んでも、その項目はスキップされるだけでエラーにはなりません。
           </li>
           <li>
             ZMK はビヘイビアの番号（behaviorId）を<b>キーボード個体ごとに採番</b>します（同じ <code>&amp;kp</code> が別の個体では別番号）。そのためエクスポートには<b>番号↔ビヘイビア名の対応表</b>を一緒に保存し、インポート時に今のキーボードの番号へ読み替えます。

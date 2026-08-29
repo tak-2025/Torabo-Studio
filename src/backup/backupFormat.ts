@@ -18,10 +18,15 @@
  *            can only be restored onto the same unit; the app can add one (see
  *            the "ビヘイビア名を付与" action) while connected to the source
  *            keyboard.
+ * version 5: adds `timing` (hold-tap timing + debounce), `encoder` (per-layer
+ *            cw/ccw/btn bindings) and `led` (per-side rule table), each optional
+ *            and stored the same way as trackball/trackpad — the raw READ wire in
+ *            base64. Absent in v1-v4 files (and skipped on export from a keyboard
+ *            whose firmware wasn't built with that feature).
  */
 
 export const BACKUP_FORMAT = "torabo-tsuki-backup";
-export const BACKUP_VERSION = 4;
+export const BACKUP_VERSION = 5;
 
 export interface BackupBinding {
   behaviorId: number;
@@ -51,6 +56,12 @@ export interface BackupFile {
    * for every behavior the keymap uses. Absent in v1-v3 files.
    */
   behaviors?: Record<string, string> | null;
+  /** v5+. Timing config READ wire (hold-tap + debounce), base64. Optional. */
+  timing?: { wireBase64: string } | null;
+  /** v5+. Encoder config READ wire (all layers), base64. Optional. */
+  encoder?: { wireBase64: string } | null;
+  /** v5+. LED config READ wire (both sides' rule tables), base64. Optional. */
+  led?: { wireBase64: string } | null;
 }
 
 /** Uint8Array -> base64 (WebView2 has btoa; encode via a binary string). */
@@ -101,6 +112,9 @@ export function validateBackup(obj: unknown): BackupFile {
     trackpad: b.trackpad ?? null,
     behaviors:
       b.behaviors && typeof b.behaviors === "object" ? b.behaviors : null,
+    timing: b.timing ?? null,
+    encoder: b.encoder ?? null,
+    led: b.led ?? null,
   };
 }
 
