@@ -74,12 +74,16 @@ export function makeConfigBackend(
   async function characteristic(
     key: ConfigKey,
   ): Promise<BluetoothRemoteGATTCharacteristic> {
-    const cached = handles.get(key);
-    if (cached) return cached;
-
     const spec: ConfigService = CONFIG_SERVICES[key];
+    // Checked before the cache too: a cached handle from before a disconnect
+    // is still a live JS object, so returning it straight away sent the
+    // actual read/write at a dead GATT server and surfaced as a raw
+    // DOMException instead of this message.
     if (!server.connected)
       throw new Error("キーボードとの接続が切れています。");
+
+    const cached = handles.get(key);
+    if (cached) return cached;
 
     let chr: BluetoothRemoteGATTCharacteristic;
     try {

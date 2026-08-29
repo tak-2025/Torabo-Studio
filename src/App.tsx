@@ -306,6 +306,19 @@ async function connect(
   let details = await getDeviceInfoWithRetries(conn);
 
   if (!details) {
+    // The transport (e.g. backends/webble/transport.ts) is already fully
+    // live at this point — GATT connected, characteristicvaluechanged
+    // subscribed, its backend registered via registerBackend() — even though
+    // no RPC has succeeded yet. Abort it before giving up, or all of that is
+    // left behind: the tab's Bluetooth indicator stays lit, and
+    // backends/index.ts's setupToraboAccess refuses to register anything
+    // else because registeredBackend() is still truthy, breaking every
+    // later reconnect (and USB fallback) until the page is reloaded.
+    // `abortController` is public on RpcTransport (transport/index.d.ts)
+    // for exactly this; the transport's own abort handler does the rest —
+    // for webble that means removing its listeners, unregistering its
+    // backend, and disconnecting the GATT server.
+    transport.abortController.abort();
     // TODO: Show a proper toast/alert not using `window.alert`
     window.alert("Failed to connect to the chosen device");
     return;
@@ -432,9 +445,26 @@ function App() {
         return;
       }
 
+      // Web Bluetooth cannot reconnect within the same page after a
+      // disconnect: Chromium keeps reusing the same BluetoothDevice/GATT
+      // objects, and a later connect() attempt on them stalls until it hits
+      // ATTACH_TIMEOUT_MS in webble/transport.ts. Reloading the page sidesteps
+      // this — the browser still remembers the pairing/permission, so the user
+      // only has to click connect again on the fresh page. Read this BEFORE
+      // aborting: teardown() unregisters the backend as part of tearing the
+      // connection down, so `registeredBackend()` is null once abort() returns.
+      const isWebble = registeredBackend()?.kind === "webble";
+
       await conn.conn.request_writable.close();
       connectionAbort.abort("User disconnected");
       setConnectionAbort(new AbortController());
+
+      if (isWebble) {
+        // teardown() (webble/transport.ts) runs synchronously off the abort
+        // signal, but give the GATT disconnect a brief moment to actually land
+        // on the OS/radio side before pulling the page out from under it.
+        setTimeout(() => window.location.reload(), 200);
+      }
     }
 
     doDisconnect();

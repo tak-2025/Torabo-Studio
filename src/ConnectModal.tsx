@@ -158,9 +158,21 @@ function simpleDevicePicker(
   const [availableDevices, setAvailableDevices] = useState<
     AvailableDevice[] | undefined
   >(undefined);
-  const [selectedTransport, setSelectedTransport] = useState<
-    TransportFactory | undefined
+  // Wrapped in a fresh object per selection, rather than storing the
+  // TransportFactory directly, so every click is a distinct value as far as
+  // React is concerned. `TRANSPORTS` in App.tsx is a module-level constant,
+  // so clicking the same button twice would otherwise call
+  // setSelectedTransport() with the exact same object reference both times —
+  // React's same-value bailout then skips a re-render (and this effect)
+  // entirely on the second click. That is invisible for a connect that
+  // resolves quickly (the state gets reset to undefined in between, so the
+  // next click really is a change) but leaves the button dead for a click
+  // that lands while the previous attempt is still stuck (e.g. a wedged
+  // attach() before its own timeout fires).
+  const [selection, setSelectedTransport] = useState<
+    { transport: TransportFactory } | undefined
   >(undefined);
+  const selectedTransport = selection?.transport;
 
   useEffect(() => {
     if (!selectedTransport) {
@@ -208,14 +220,19 @@ function simpleDevicePicker(
     return () => {
       ignore = true;
     };
-  }, [selectedTransport]);
+    // Depends on `selection` (the wrapper), not `selectedTransport` (the
+    // TransportFactory it unwraps to): two different wrappers can carry the
+    // same TransportFactory reference — that is the whole point of wrapping,
+    // see above — and depending on the unwrapped value would let React's
+    // same-value bailout skip this effect on a same-button re-click again.
+  }, [selection]);
 
   let connections = transports.map((t) => (
     <li key={t.label} className="list-none flex flex-col gap-1 max-w-44">
       <button
         className="bg-base-300 hover:bg-primary hover:text-primary-content rounded px-2 py-1"
         type="button"
-        onClick={async () => setSelectedTransport(t)}
+        onClick={async () => setSelectedTransport({ transport: t })}
       >
         {t.label}
       </button>

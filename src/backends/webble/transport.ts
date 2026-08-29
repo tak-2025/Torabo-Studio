@@ -121,12 +121,32 @@ const KEYBOARD_FILTERS: BluetoothLEScanFilter[] = [
 /**
  * How long to wait on the remembered keyboard before giving up on it.
  *
- * Kept short because opening the chooser needs the click's user activation,
- * which expires a few seconds after the click. But short means it fires often —
- * a first connection with bonding and discovery routinely takes longer than
- * this — so what happens on expiry has to be safe. See `connectWithin`.
+ * There is no in-call fallback to the chooser to preserve user activation
+ * for: this path either succeeds or throws and asks for another click (see
+ * `connectOnce` below), and never opens the chooser itself within the same
+ * call. So the only thing this budget has to do is comfortably cover a real
+ * reconnect. On Windows, reconnecting right after a disconnect — bonding
+ * lookup, service discovery, the peripheral finishing its own teardown of
+ * the previous link — routinely takes longer than the old 3s allowed, which
+ * made a perfectly healthy reconnect look unreachable and permanently
+ * retired the device for the session via `rememberedFailed` below. See
+ * `connectWithin` for what happens on expiry.
  */
-const REMEMBERED_CONNECT_TIMEOUT_MS = 3000;
+const REMEMBERED_CONNECT_TIMEOUT_MS = 8000;
+
+/**
+ * Upper bound on the whole `attach()` — connect, discovery, and notification
+ * setup together — not just the initial `gatt.connect()` that
+ * `connectWithin` bounds on its own.
+ *
+ * Attempts are serialised through `pendingConnect` below, so one attach()
+ * left permanently pending (a device that connects at the BLE layer but then
+ * wedges partway through discovery or CCCD setup, which does happen on
+ * Windows) makes every later connect click a silent no-op: nothing ever
+ * rejects, so the queue never unblocks. This gives every attempt a hard
+ * deadline so the queue always moves again.
+ */
+const ATTACH_TIMEOUT_MS = 15000;
 
 /**
  * Remembered devices whose reconnect already failed this session.
@@ -174,6 +194,20 @@ async function requestDevice(allDevices: boolean): Promise<BluetoothDevice> {
 }
 
 /**
+ * Generation counter per GATT server, bumped at the start of every
+ * `connectWithin()` call.
+ *
+ * `device.gatt` is a singleton per device, so a second attempt on the same
+ * device — a fresh click after the first one timed out, or an impatient
+ * double-click — shares this same server object with the first. When an
+ * abandoned attempt's `gatt.connect()` finally resolves, it needs to tell "I
+ * am still the most recent attempt" from "a later attempt has since
+ * connected, and something may already be using it" before it is allowed to
+ * disconnect.
+ */
+const connectGeneration = new WeakMap<BluetoothRemoteGATTServer, number>();
+
+/**
  * Connect, but stop waiting after `ms` — and make sure the attempt we stopped
  * waiting for cannot outlive us.
  *
@@ -183,33 +217,46 @@ async function requestDevice(allDevices: boolean): Promise<BluetoothDevice> {
  * discovery against a connection someone else is still setting up — which is
  * how "the service is there but it has no characteristics" happens on hardware
  * that plainly has both. So the abandoned attempt is disconnected the moment it
- * settles, and no caller may start another attach on this device before then.
+ * settles — unless a newer attempt has since taken over this device, in which
+ * case disconnecting would tear down THAT connection instead (see
+ * `connectGeneration`).
  */
 function connectWithin(
   gatt: BluetoothRemoteGATTServer,
   ms: number,
 ): Promise<BluetoothRemoteGATTServer> {
+  const myGeneration = (connectGeneration.get(gatt) ?? 0) + 1;
+  connectGeneration.set(gatt, myGeneration);
+
   let abandoned = false;
   const pending = gatt.connect();
 
+  const timeout = new Promise<never>((_, reject) => {
+    const timer = setTimeout(() => {
+      abandoned = true;
+      reject(new Error(`接続がタイムアウトしました（${ms}ms）`));
+    }, ms);
+    // Cleared as soon as the real connect settles either way, so an attempt
+    // that finishes on time — the normal case — does not sit holding a timer
+    // for the rest of the session.
+    pending.then(
+      () => clearTimeout(timer),
+      () => clearTimeout(timer),
+    );
+  });
+
   pending.then(
     () => {
-      if (abandoned) gatt.disconnect();
+      if (abandoned && connectGeneration.get(gatt) === myGeneration) {
+        gatt.disconnect();
+      }
     },
     () => {
       // Failed on its own; nothing to clean up.
     },
   );
 
-  return Promise.race([
-    pending,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => {
-        abandoned = true;
-        reject(new Error(`接続がタイムアウトしました（${ms}ms）`));
-      }, ms),
-    ),
-  ]);
+  return Promise.race([pending, timeout]);
 }
 
 /**
@@ -314,7 +361,44 @@ async function connectOnce(options: ConnectOptions): Promise<RpcTransport> {
   }
 }
 
+/**
+ * Bounds the whole attach() (connect + discovery + notification setup) at
+ * `ATTACH_TIMEOUT_MS`, on top of whatever `attachOnce` itself does with
+ * `timeoutMs` for the connect step alone.
+ *
+ * On timeout the abandoned `attachOnce` call is left to fail on its own — its
+ * error is swallowed here rather than surfacing as an unhandled rejection —
+ * and, if the device is still connected at the BLE layer, that connection is
+ * released so it does not sit half-attached forever and so a later attempt
+ * on this device is not blocked behind a link nothing is actually using.
+ * `attachOnce`'s own `gattserverdisconnected` handling (once it gets far
+ * enough to register one) then unwinds anything it had already set up.
+ */
 async function attach(
+  device: BluetoothDevice,
+  timeoutMs?: number,
+): Promise<RpcTransport> {
+  const inner = attachOnce(device, timeoutMs);
+  inner.catch(() => undefined);
+
+  const timeout = new Promise<never>((_, reject) => {
+    const timer = setTimeout(() => {
+      if (device.gatt?.connected) device.gatt.disconnect();
+      reject(
+        new Error(
+          `接続処理がタイムアウトしました（${ATTACH_TIMEOUT_MS}ms）。` +
+            "ブラウザの制約により、この状態からは再接続できません。" +
+            "ページを再読み込みしてから接続し直してください。",
+        ),
+      );
+    }, ATTACH_TIMEOUT_MS);
+    inner.finally(() => clearTimeout(timer));
+  });
+
+  return Promise.race([inner, timeout]);
+}
+
+async function attachOnce(
   device: BluetoothDevice,
   timeoutMs?: number,
 ): Promise<RpcTransport> {
@@ -407,6 +491,16 @@ async function attach(
    * for the NEXT one, where it enqueues into a closed stream ("Cannot enqueue a
    * chunk into a closed readable stream") and interferes with the notification
    * stream the new connection depends on.
+   *
+   * Also the one place that releases the GATT link itself, regardless of
+   * which of the three paths got here first. It used to be only `onAbort`'s
+   * job, so a plain stream cancel (ts-client closing `request_writable`) or a
+   * `gattserverdisconnected` event left `device.gatt.connected` true — the
+   * tab's Bluetooth indicator stayed lit, and the next connect attempt on
+   * this device inherited a half-alive link. `disconnect()` on an already
+   * disconnected server is a documented no-op, so calling it unconditionally
+   * here is safe from every path, including the one that got here BECAUSE the
+   * link just dropped.
    */
   let tornDown = false;
   const teardown = () => {
@@ -422,6 +516,7 @@ async function attach(
     } catch {
       // Already closed or errored by the pipe that cancelled us.
     }
+    if (device.gatt?.connected) device.gatt.disconnect();
   };
 
   const onValue = (ev: Event) => {
@@ -492,10 +587,16 @@ async function attach(
   const signal = abortController.signal;
   const onAbort = () => {
     signal.removeEventListener("abort", onAbort);
+    // teardown() now owns releasing the GATT link itself (see its doc
+    // comment), so there is nothing left for this handler to do beyond
+    // triggering it.
     teardown();
-    device.gatt?.disconnect();
   };
   signal.addEventListener("abort", onAbort);
+
+  // A clean attach means this device is reachable again, so it deserves
+  // another try even if an earlier reconnect this session timed out.
+  rememberedFailed.delete(device.id);
 
   return { label, abortController, readable, writable };
 }
