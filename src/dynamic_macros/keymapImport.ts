@@ -11,6 +11,7 @@
  */
 
 import NAMES from "../zmk-keycodes.json";
+import { tr } from "../i18n";
 import { DmAction, DmStep } from "./dmacConfig";
 
 // ZMK implicit-modifier function names -> bit (bits 24..31 of the keycode).
@@ -63,7 +64,7 @@ function parseBindings(raw: string): { steps: DmStep[]; warnings: string[] } {
       case "key_press": {
         const kc = resolveKeycode(arg);
         if (kc === null) {
-          warnings.push(`未対応キー: &kp ${arg}`);
+          warnings.push(tr("mac.warn.unknownKey", { arg }));
           break;
         }
         steps.push({ action, keycode: kc });
@@ -86,7 +87,7 @@ function parseBindings(raw: string): { steps: DmStep[]; warnings: string[] } {
       case "trans":
         break;
       default:
-        warnings.push(`未対応の動作: &${tok}`);
+        warnings.push(tr("mac.warn.unknownBehavior", { tok }));
     }
     if (steps.length >= 16) break; // DM_STEPS cap; extras dropped (warned below)
   }

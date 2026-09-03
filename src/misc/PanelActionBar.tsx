@@ -1,5 +1,5 @@
 import { ReactNode } from "react";
-import { Download, Save } from "lucide-react";
+import { AlertTriangle, Download, Save } from "lucide-react";
 
 import { useT } from "../i18n";
 
@@ -39,6 +39,28 @@ export interface PanelActionBarProps {
   onWrite?: () => void;
   /** Disables the write button (e.g. no config loaded yet, or busy). */
   writeDisabled?: boolean;
+  /**
+   * The firmware speaks a NEWER wire than this app's codec for the panel's
+   * feature (caps/toraboCaps.ts's `canWriteFeature`). Blocks the write button
+   * and says why, once, in the one place every panel already shares.
+   *
+   * Deliberately separate from `writeDisabled`: that one is transient state
+   * (nothing read yet, a call in flight) and needs no explanation, this one is
+   * a property of the keyboard on the other end and the user can only act on it
+   * if we tell them. Reads stay available either way — the panel degrades to
+   * read-only rather than disappearing, so the settings can still be inspected.
+   *
+   * Panels that save per row/slot instead of through `onWrite` (Macros/Combos)
+   * pass this too, for the message, and disable their own save buttons.
+   */
+  writeBlocked?: boolean;
+  /**
+   * Why the write is blocked, when it is blocked for something other than the
+   * app/firmware version gap `writeBlocked` was written for — e.g. the trackpad
+   * refusing a config the firmware could accept but never read back again.
+   * Defaults to the version-gap wording.
+   */
+  writeBlockedMsg?: string;
   /** Override the read button's main label. Defaults to the numbered
    * "① 読み込む" — pass `t("actionBar.readPlain")` for panels whose flow has
    * no corresponding "③" write step. */
@@ -61,6 +83,8 @@ export function PanelActionBar({
   onRead,
   onWrite,
   writeDisabled,
+  writeBlocked,
+  writeBlockedMsg,
   readLabel,
   readSubLabel,
   writeLabel,
@@ -84,7 +108,7 @@ export function PanelActionBar({
           type="button"
           className="btn btn-success gap-2"
           onClick={onWrite}
-          disabled={writeDisabled}
+          disabled={writeDisabled || writeBlocked}
         >
           <Save size={18} />
           <span>{writeLabel ?? t("actionBar.write")}</span>
@@ -92,6 +116,12 @@ export function PanelActionBar({
             {writeSubLabel ?? t("actionBar.writeSub")}
           </span>
         </button>
+      )}
+      {writeBlocked && (
+        <span className="flex items-start gap-1.5 text-warning text-sm font-medium max-w-xl">
+          <AlertTriangle size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
+          {writeBlockedMsg ?? t("actionBar.writeBlocked")}
+        </span>
       )}
       <StatusBadge status={status} />
     </div>

@@ -24,10 +24,16 @@ import { ConnectionContext } from "../rpc/ConnectionContext";
 import { fetchLayerInfo } from "../rpc/keyboardInfo";
 import { trackpadReadConfig, trackpadWriteConfig } from "../backends";
 import { HidUsagePicker } from "../behaviors/HidUsagePicker";
-import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
+import { PanelActionBar } from "../misc/PanelActionBar";
+import { usePanelStatus } from "../misc/usePanelStatus";
 import { useLocalStorageState } from "../misc/useLocalStorageState";
 import { useT } from "../i18n";
-import { ToraboCaps, hasTrackpadCoast } from "../caps/toraboCaps";
+import {
+  Feature,
+  ToraboCaps,
+  canWriteFeature,
+  hasTrackpadCoast,
+} from "../caps/toraboCaps";
 import {
   TpAxisCfg,
   TpBinding,
@@ -41,38 +47,45 @@ import {
   TP_COAST_FRICTION_MIN,
   TP_COAST_THRESHOLD_MAX,
   TP_COAST_THRESHOLD_MIN,
+  TP_FW_BLOB_MAX,
   presetForV1Role,
   decodeTp,
   encodeTp,
   describeDevice,
+  tpFirmwareReadbackSize,
+  tpReadbackTooBig,
 } from "./tpConfigV2";
 
 /** HID usage-page ids for the shared picker. */
 const PAGE_KEYBOARD = 0x07;
 const PAGE_CONSUMER = 0x0c;
 
+/** The translate function returned by `useT()`, passed to non-hook helpers. */
+type Translate = ReturnType<typeof useT>;
+
 /**
- * Curated consumer (&cp) usages with Japanese labels for the media-key dropdown.
- * `id` is the raw Consumer-page (0x0C) usage id written straight to binding.param
+ * Curated consumer (&cp) usages for the media-key dropdown. `labelKey` is a
+ * message key (see i18n/panels/trackpad.ts) resolved by the consumer, and `id`
+ * is the raw Consumer-page (0x0C) usage id written straight to binding.param
  * (mods always 0 for &cp). Every id below was verified against the bundled HID
  * usage table (src/keyboard-and-consumer-usage-tables.json, Consumer page) —
  * do not add an id without checking it there first.
  */
-const CP_CURATED: { id: number; label: string }[] = [
-  { id: 0xcd, label: "再生/一時停止" }, // Play/Pause
-  { id: 0xb5, label: "次の曲" }, // Scan Next Track
-  { id: 0xb6, label: "前の曲" }, // Scan Previous Track
-  { id: 0xb7, label: "停止" }, // Stop
-  { id: 0xe2, label: "ミュート" }, // Mute
-  { id: 0xe9, label: "音量を上げる" }, // Volume Increment
-  { id: 0xea, label: "音量を下げる" }, // Volume Decrement
-  { id: 0x6f, label: "明るさを上げる" }, // Display Brightness Increment
-  { id: 0x70, label: "明るさを下げる" }, // Display Brightness Decrement
-  { id: 0x224, label: "ブラウザ戻る" }, // AC Back
-  { id: 0x225, label: "ブラウザ進む" }, // AC Forward
-  { id: 0x223, label: "ホーム" }, // AC Home
-  { id: 0x221, label: "検索" }, // AC Search
-  { id: 0x192, label: "電卓" }, // AL Calculator
+const CP_CURATED: { id: number; labelKey: string }[] = [
+  { id: 0xcd, labelKey: "tp.cp.playPause" }, // Play/Pause
+  { id: 0xb5, labelKey: "tp.cp.next" }, // Scan Next Track
+  { id: 0xb6, labelKey: "tp.cp.prev" }, // Scan Previous Track
+  { id: 0xb7, labelKey: "tp.cp.stop" }, // Stop
+  { id: 0xe2, labelKey: "tp.cp.mute" }, // Mute
+  { id: 0xe9, labelKey: "tp.cp.volUp" }, // Volume Increment
+  { id: 0xea, labelKey: "tp.cp.volDn" }, // Volume Decrement
+  { id: 0x6f, labelKey: "tp.cp.briUp" }, // Display Brightness Increment
+  { id: 0x70, labelKey: "tp.cp.briDn" }, // Display Brightness Decrement
+  { id: 0x224, labelKey: "tp.cp.back" }, // AC Back
+  { id: 0x225, labelKey: "tp.cp.forward" }, // AC Forward
+  { id: 0x223, labelKey: "tp.cp.home" }, // AC Home
+  { id: 0x221, labelKey: "tp.cp.search" }, // AC Search
+  { id: 0x192, labelKey: "tp.cp.calc" }, // AL Calculator
 ];
 
 /* Device labels used to be hardcoded here (0 = "左パッド", 1 = "右パッド (ext)"),
@@ -81,13 +94,13 @@ const CP_CURATED: { id: number; label: string }[] = [
  * central on either half, pad on the board's own FFC or on the extender, etc.
  * See describeDevice() in tpConfigV2.ts; unknown meta degrades to "デバイス N". */
 
-const TP_BEH_LABELS: Record<TpBehavior, string> = {
-  [TpBehavior.None]: "なし（&none）",
-  [TpBehavior.Kp]: "キー入力（&kp）",
-  [TpBehavior.Cp]: "メディアキー（&cp）",
-  [TpBehavior.Mo]: "押している間レイヤー切替（&mo）",
-  [TpBehavior.To]: "レイヤー切替（&to）",
-  [TpBehavior.Tog]: "レイヤー固定/解除（&tog）",
+const TP_BEH_LABEL_KEYS: Record<TpBehavior, string> = {
+  [TpBehavior.None]: "tp.beh.none",
+  [TpBehavior.Kp]: "tp.beh.kp",
+  [TpBehavior.Cp]: "tp.beh.cp",
+  [TpBehavior.Mo]: "tp.beh.mo",
+  [TpBehavior.To]: "tp.beh.to",
+  [TpBehavior.Tog]: "tp.beh.tog",
 };
 
 /**
@@ -95,11 +108,11 @@ const TP_BEH_LABELS: Record<TpBehavior, string> = {
  * labels double as the direct swipe entries in the flattened 機能 dropdown
  * (v1 mental model: one click picks Volume/Brightness/Zoom/Browser).
  */
-const PRESETS: { key: string; role: number; label: string }[] = [
-  { key: "volume", role: 3, label: "音量（上下スワイプ）" },
-  { key: "brightness", role: 4, label: "明るさ（上下スワイプ）" },
-  { key: "zoom", role: 5, label: "ズーム（上下スワイプ）" },
-  { key: "browser", role: 6, label: "ブラウザ 進む・戻る" },
+const PRESETS: { key: string; role: number; labelKey: string }[] = [
+  { key: "volume", role: 3, labelKey: "tp.preset.volume" },
+  { key: "brightness", role: 4, labelKey: "tp.preset.brightness" },
+  { key: "zoom", role: 5, labelKey: "tp.preset.zoom" },
+  { key: "browser", role: 6, labelKey: "tp.preset.browser" },
 ];
 
 /** Boolean (de)serializer for useLocalStorageState (open/closed section flags). */
@@ -111,17 +124,22 @@ const BOOL_LS = {
 /**
  * Short 機能 label for the collapsed-layer swipe summary. Derives from the same
  * FUNC_OPTIONS / AXIS_META used by the dropdown, then strips the parenthetical
- * gloss (e.g. "カーソル移動（Move）" → "カーソル移動") for a compact one-liner.
+ * gloss (e.g. "カーソル移動（Move）" → "カーソル移動", "Cursor (Move)" →
+ * "Cursor") for a compact one-liner. Both paren styles are handled so the
+ * English copy trims the same way the Japanese does.
  */
-function shortFuncLabel(funcValue: string, axisLabel: "X" | "Y"): string {
-  const full =
+function shortFuncLabel(
+  t: Translate,
+  funcValue: string,
+  axisLabel: "X" | "Y",
+): string {
+  const key =
     funcValue === "scroll"
-      ? AXIS_META[axisLabel].scrollLabel
-      : FUNC_OPTIONS.find((o) => o.value === funcValue)?.label ?? funcValue;
-  return full.replace(/（.*）\s*$/, "");
+      ? AXIS_META[axisLabel].scrollLabelKey
+      : FUNC_OPTIONS.find((o) => o.value === funcValue)?.labelKey;
+  const full = key ? t(key) : funcValue;
+  return full.replace(/\s*[（(][^（(]*[）)]\s*$/, "");
 }
-
-type Status = PanelStatus;
 
 const bindEq = (a: TpBinding, b: TpBinding) =>
   a.behavior === b.behavior && a.param === b.param && a.mods === b.mods;
@@ -140,12 +158,12 @@ function matchPreset(pos: TpBinding, neg: TpBinding): string {
  * roles, the four swipe presets, and a free-assign "custom" all live at the top
  * level; there is no separate abstract "Encoder" step any more.
  */
-const FUNC_OPTIONS: { value: string; label: string }[] = [
-  { value: "move", label: "カーソル移動（Move）" },
-  { value: "scroll", label: "スクロール（Scroll）" },
-  ...PRESETS.map((p) => ({ value: p.key, label: p.label })),
-  { value: "custom", label: "カスタム（スワイプに自由割当）" },
-  { value: "off", label: "無効（Off）" },
+const FUNC_OPTIONS: { value: string; labelKey: string }[] = [
+  { value: "move", labelKey: "tp.func.move" },
+  { value: "scroll", labelKey: "tp.func.scroll" },
+  ...PRESETS.map((p) => ({ value: p.key, labelKey: p.labelKey })),
+  { value: "custom", labelKey: "tp.func.custom" },
+  { value: "off", labelKey: "tp.func.off" },
 ];
 
 /**
@@ -257,15 +275,17 @@ function patchCoast(
 /**
  * @param caps what the connected firmware says it can do, passed down rather
  *   than read again here (MainPanels has already asked; a second capability read
- *   would take its turn ahead of this panel's own). Only used to decide whether
- *   the inertial-scroll section is offered.
+ *   would take its turn ahead of this panel's own). Decides whether the
+ *   inertial-scroll section is offered, and whether writing is safe at all.
  */
 export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
   const t = useT();
   const { conn } = useContext(ConnectionContext);
   const [cfg, setCfg] = useState<TpConfig | null>(null);
   const [dev, setDev] = useState(0);
-  const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const { status, read, write, setStatus } = usePanelStatus({
+    onReadFailed: () => setCfg(null),
+  });
   // Hide trailing torabo-reserved layers (getKeymap returns only active layers).
   const [activeLayers, setActiveLayers] = useState<number | null>(null);
   // Layer names by index (name || index fallback). null when not connected / RPC
@@ -274,6 +294,31 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
   // Axes the user explicitly switched to カスタム ("dev:layer:axis" keys) — see
   // the comment at the layers map. UI-only; never written to the wire.
   const [customAxes, setCustomAxes] = useState<Set<string>>(new Set());
+  // The firmware's wire is newer than encodeTp can produce: read, but never
+  // write back a config with the fields we couldn't decode stripped out.
+  const versionBlocked = !canWriteFeature(caps ?? null, Feature.Trackpad);
+  // The second reason a write is refused, and the worse one: the firmware would
+  // ACCEPT this config and then never be able to read it back, which bricks the
+  // trackpad settings for good (no read => no read-modify-write => no way out
+  // from the app). See TP_FW_BLOB_MAX in tpConfigV2.ts. Today's 2-device
+  // hardware reads back at 1536 B, so this can only fire on a config that
+  // arrived from somewhere else — the panel itself cannot add a device.
+  //
+  // The budget is the firmware's Kconfig default for now. A build may have
+  // raised it and a planned desc_ver 2 capability descriptor will report the
+  // real value; when it does, this one line reads it off `caps` and everything
+  // below already takes it as an argument.
+  const blobBudget = TP_FW_BLOB_MAX;
+  const readbackSize = cfg ? tpFirmwareReadbackSize(cfg) : 0;
+  const sizeBlocked = !!cfg && tpReadbackTooBig(cfg, blobBudget);
+  const writeBlocked = versionBlocked || sizeBlocked;
+  // The version gap wins when both apply — "your app is out of date" is the
+  // more basic answer, and it is the order restoreBlock resolves them in too.
+  // undefined leaves PanelActionBar on its own default (the version wording).
+  const writeBlockedMsg =
+    sizeBlocked && !versionBlocked
+      ? t("tp.blocked.readbackTooBig", { size: readbackSize, max: blobBudget })
+      : undefined;
 
   // Section fold state (persisted, open by default). UI-only.
   const [swipeOpen, setSwipeOpen] = useLocalStorageState<boolean>(
@@ -315,30 +360,35 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
     setLayerNames(info.layerNames);
   }, [conn]);
 
-  const onRead = useCallback(async () => {
-    setStatus({ kind: "busy", msg: t("status.reading") });
-    try {
-      await loadLayerInfo();
-      const c = decodeTp(await trackpadReadConfig());
-      setCfg(c);
-      setCustomAxes(new Set()); // fresh read: derive 機能 purely from the data
-      setDev((d) => Math.min(d, Math.max(0, c.devices.length - 1)));
-      setStatus({ kind: "ok", msg: t("status.loaded") });
-    } catch (e) {
-      setStatus({ kind: "error", msg: t("status.error") + String(e) });
-    }
-  }, [loadLayerInfo, t]);
+  const onRead = useCallback(
+    () =>
+      read(async () => {
+        await loadLayerInfo();
+        const c = decodeTp(await trackpadReadConfig());
+        setCfg(c);
+        setCustomAxes(new Set()); // fresh read: derive 機能 purely from the data
+        setDev((d) => Math.min(d, Math.max(0, c.devices.length - 1)));
+      }),
+    [loadLayerInfo, read]
+  );
 
-  const onWrite = useCallback(async () => {
+  const onWrite = useCallback(() => {
     if (!cfg) return;
-    setStatus({ kind: "busy", msg: t("status.saving") });
-    try {
-      await trackpadWriteConfig(encodeTp(cfg));
-      setStatus({ kind: "ok", msg: t("status.applied") });
-    } catch (e) {
-      setStatus({ kind: "error", msg: t("status.error") + String(e) });
+    // Belt as well as braces: the button is already disabled when this trips,
+    // but this is the function that actually reaches the wire, and the write it
+    // would emit is unrecoverable.
+    if (tpReadbackTooBig(cfg, blobBudget)) {
+      setStatus({
+        kind: "error",
+        msg: t("tp.blocked.readbackTooBig", {
+          size: tpFirmwareReadbackSize(cfg),
+          max: blobBudget,
+        }),
+      });
+      return;
     }
-  }, [cfg, t]);
+    return write(async () => trackpadWriteConfig(encodeTp(cfg)));
+  }, [blobBudget, cfg, setStatus, t, write]);
 
   if (!conn) {
     return (
@@ -366,19 +416,21 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
   return (
     <div className="p-4 overflow-auto flex flex-col gap-4 h-full">
       <div className="flex flex-col gap-1">
-        <h2 className="text-fluid-xl font-bold">
-          トラックパッド設定
-        </h2>
+        <h2 className="text-fluid-xl font-bold">{t("tp.title")}</h2>
         <p className="text-sm text-base-content/70">
-          ① <b>読み込む</b>で現在値を取得 → ②
-          軸の機能・スワイプ動作・タップ/ジェスチャを変更 → ③ <b>書き込む</b>
-          で即反映＆本体に保存
+          {t("tp.intro.pre")}
+          <b>{t("tp.intro.read")}</b>
+          {t("tp.intro.mid")}
+          <b>{t("tp.intro.write")}</b>
+          {t("tp.intro.post")}
         </p>
       </div>
       <PanelActionBar
         onRead={onRead}
         onWrite={onWrite}
         writeDisabled={!cfg || status.kind === "busy"}
+        writeBlocked={writeBlocked}
+        writeBlockedMsg={writeBlockedMsg}
         status={status}
       />
 
@@ -387,7 +439,7 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
       ) : (
         <>
           <div className="flex flex-wrap items-end gap-6 rounded-md border border-base-300 bg-base-200/40 p-4 self-stretch">
-            <Field label="デバイス">
+            <Field label={t("tp.device")}>
               <select
                 className="select select-bordered select-md w-56"
                 aria-label="trackpad device"
@@ -396,7 +448,7 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
               >
                 {cfg.devices.map((d, i) => (
                   <option key={i} value={i}>
-                    {describeDevice(d.deviceId, d.meta)}
+                    {describeDevice(d.deviceId, d.meta, t)}
                   </option>
                 ))}
               </select>
@@ -409,53 +461,48 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
             </summary>
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 mt-2">
               <dt className="font-semibold text-base-content whitespace-nowrap">
-                機能
+                {t("tp.th.func")}
               </dt>
               <dd>
-                軸に割り当てる動作を一覧から直接選びます。カーソル移動（Move）/
-                スクロール（Scroll）/ 無効（Off）のほか、
-                <b>音量・明るさ・ズーム・ブラウザ 進む戻る</b>
-                は上下スワイプのプリセットとしてワンクリックで選べます。
-                <b>カスタム</b>
-                を選ぶと＋方向（上）／−方向（下）に任意の動作を割り当てられます。
+                {t("tp.help.func.1")}
+                <b>{t("tp.help.func.b1")}</b>
+                {t("tp.help.func.2")}
+                <b>{t("tp.help.func.b2")}</b>
+                {t("tp.help.func.3")}
               </dd>
               <dt className="font-semibold text-base-content whitespace-nowrap">
-                スワイプ動作
+                {t("tp.help.swipe.dt")}
               </dt>
               <dd>
-                <b>カスタム</b>のとき <b>＋方向（上）</b>と<b>−方向（下）</b>
-                それぞれに 1 つの動作を割当。
-                音量・明るさ・ズーム・ブラウザは機能の一覧から選ぶだけで自動設定されます。
+                {t("tp.help.swipe.pre")}
+                <b>{t("tp.help.swipe.b1")}</b>
+                {t("tp.help.swipe.mid1")}
+                <b>{t("tp.help.swipe.b2")}</b>
+                {t("tp.help.swipe.mid2")}
+                <b>{t("tp.help.swipe.b3")}</b>
+                {t("tp.help.swipe.post")}
               </dd>
               <dt className="font-semibold text-base-content whitespace-nowrap">
-                メディアキー
+                {t("tp.help.media.dt")}
               </dt>
-              <dd>
-                メディアキー（再生/停止・音量など）は「カスタム」を選び、動作で「メディアキー（&cp）」を選ぶと一覧から選べます。
-              </dd>
+              <dd>{t("tp.help.media.dd")}</dd>
               <dt className="font-semibold text-base-content whitespace-nowrap">
-                動作(behavior)
+                {t("tp.help.behavior.dt")}
               </dt>
-              <dd>
-                キー入力（&kp、修飾キー可）/
-                メディアキー（&cp、音量・輝度など）/
-                レイヤー操作（&mo・&to・&tog）/ なし（&none）
-              </dd>
+              <dd>{t("tp.help.behavior.dd")}</dd>
               <dt className="font-semibold text-base-content whitespace-nowrap">
-                向き
+                {t("tp.th.dir")}
               </dt>
-              <dd>reverse にチェックで逆方向（＋/−、上下、進む戻るが反転）</dd>
+              <dd>{t("tp.help.dir.dd")}</dd>
               <dt className="font-semibold text-base-content whitespace-nowrap">
-                速さ・感度(step)
+                {t("tp.th.step")}
               </dt>
-              <dd>
-                スクロールやカーソルの速さもここで調整します。1=最も速く敏感、数字が大きいほど遅い（最大32）。
-                Encoder では「1操作あたりの必要移動量」
-              </dd>
+              <dd>{t("tp.help.step.dd")}</dd>
             </dl>
             <p className="mt-2 text-base-content/70">
-              ミニトラックパッドは実質「縦方向」の操作です。主に <b>Y 軸</b>
-              に機能を割り当ててください。
+              {t("tp.help.axisNote.1")}
+              <b>{t("tp.help.axisNote.b")}</b>
+              {t("tp.help.axisNote.2")}
             </p>
           </details>
 
@@ -472,13 +519,11 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
               ) : (
                 <ChevronRight className="w-5 h-5 shrink-0" />
               )}
-              <span className="text-base font-bold">
-                なぞる操作（スワイプ）
-              </span>
+              <span className="text-base font-bold">{t("tp.swipe.title")}</span>
             </button>
             {swipeOpen && (
               <p className="text-sm text-base-content/70 pl-6">
-                レイヤーごとに、横方向(X)・縦方向(Y)の動きへ機能を割り当てます（カーソル移動・スクロール・音量など）
+                {t("tp.swipe.desc")}
               </p>
             )}
           </div>
@@ -491,7 +536,7 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
                   className="btn btn-xs btn-ghost"
                   onClick={() => setCollapsedSwipeLayers(new Set())}
                 >
-                  すべて開く
+                  {t("tp.expandAll")}
                 </button>
                 <button
                   type="button"
@@ -504,7 +549,7 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
                     )
                   }
                 >
-                  すべて閉じる
+                  {t("tp.collapseAll")}
                 </button>
               </div>
               {/* shrink-0 is REQUIRED: this is the panel's only overflow container, so
@@ -516,23 +561,23 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
                 <table className="table table-zebra w-full [&_th]:text-left [&_td]:text-left [&_th]:px-5 [&_th]:py-3 [&_td]:px-5 [&_td]:py-3 [&_td]:text-sm [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:bg-base-200 [&_thead_th]:z-10 [&_tbody_tr:hover]:bg-base-200/50">
                   <thead>
                     <tr className="bg-base-200">
-                      <th title="レイヤー（layer）">レイヤー</th>
-                      <th>軸</th>
+                      <th title={t("tp.th.layerTitle")}>{t("tp.th.layer")}</th>
+                      <th>{t("tp.th.axis")}</th>
                       <th>
-                        機能
+                        {t("tp.th.func")}
                         <br />
                         <span className="font-normal opacity-60">Role</span>
                       </th>
                       <th>
-                        向き
+                        {t("tp.th.dir")}
                         <br />
                         <span className="font-normal opacity-60">reverse</span>
                       </th>
                       <th>
-                        速さ・感度(step)
+                        {t("tp.th.step")}
                         <br />
                         <span className="font-normal opacity-60">
-                          大きいほど遅い
+                          {t("tp.th.stepSub")}
                         </span>
                       </th>
                     </tr>
@@ -541,8 +586,7 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
                     {layerCount === 0 && (
                       <tr>
                         <td colSpan={5} className="text-base-content/60">
-                          レイヤー情報を取得できませんでした。もう一度「①
-                          読み込む」を押してください。
+                          {t("tp.noLayerInfo")}
                         </td>
                       </tr>
                     )}
@@ -576,7 +620,7 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
                               <button
                                 type="button"
                                 className="flex items-start gap-1 text-left"
-                                aria-label={`レイヤー ${i} を展開`}
+                                aria-label={t("tp.aria.expandLayer", { n: i })}
                                 onClick={() => toggleSwipeLayer(i)}
                               >
                                 <ChevronRight className="w-4 h-4 mt-0.5 shrink-0" />
@@ -596,8 +640,8 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
                               colSpan={4}
                               className="text-sm text-base-content/70"
                             >
-                              X: {shortFuncLabel(xFunc, "X")} / Y:{" "}
-                              {shortFuncLabel(yFunc, "Y")}
+                              X: {shortFuncLabel(t, xFunc, "X")} / Y:{" "}
+                              {shortFuncLabel(t, yFunc, "Y")}
                             </td>
                           </tr>
                         );
@@ -690,7 +734,8 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
             />
           ) : (
             <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm leading-relaxed text-base-content/80 self-start max-w-3xl">
-              <span className="font-bold">{t("coast.title")}</span>：
+              <span className="font-bold">{t("coast.title")}</span>
+              {t("common.labelSep")}
               {t("coast.unavailable")}
             </div>
           )}
@@ -709,8 +754,7 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
           )}
 
           <div className="rounded-md border border-info/40 bg-info/10 px-4 py-3 text-sm leading-relaxed text-base-content/80 self-start max-w-3xl">
-            書き込みは即反映され、本体に保存されます。空・不正な設定は必ず通常のカーソル移動／ドライバ既定クリックに戻ります。{" "}
-            {t("trackpad.writeScope")}
+            {t("tp.writeNote")} {t("trackpad.writeScope")}
           </div>
         </>
       )}
@@ -723,11 +767,13 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
  * axis-specific wording of the scroll option in the 機能 dropdown. UI-only —
  * the option's value is still "scroll" and the patch is unchanged.
  */
-const AXIS_META: Record<"X" | "Y", { rowLabel: string; scrollLabel: string }> =
-  {
-    X: { rowLabel: "横方向（X）", scrollLabel: "横スクロール（Scroll）" },
-    Y: { rowLabel: "縦方向（Y）", scrollLabel: "縦スクロール（Scroll）" },
-  };
+const AXIS_META: Record<
+  "X" | "Y",
+  { rowLabelKey: string; scrollLabelKey: string }
+> = {
+  X: { rowLabelKey: "tp.axis.x", scrollLabelKey: "tp.axis.x.scroll" },
+  Y: { rowLabelKey: "tp.axis.y", scrollLabelKey: "tp.axis.y.scroll" },
+};
 
 function AxisRow({
   layerCell,
@@ -753,6 +799,7 @@ function AxisRow({
   onFuncChange: (value: string) => void;
   onChange: (patch: Partial<TpAxisCfg>) => void;
 }) {
+  const t = useT();
   const meta = AXIS_META[axisLabel];
   return (
     <tr className={layerCell !== undefined ? "border-t-2 border-base-300" : ""}>
@@ -766,7 +813,7 @@ function AxisRow({
               <button
                 type="button"
                 className="shrink-0 mt-0.5"
-                aria-label={`レイヤー ${layerCell} を折りたたむ`}
+                aria-label={t("tp.aria.collapseLayer", { n: layerCell })}
                 onClick={onToggleCollapse}
               >
                 <ChevronDown className="w-4 h-4" />
@@ -783,7 +830,7 @@ function AxisRow({
           </div>
         </td>
       )}
-      <td className="font-medium whitespace-nowrap">{meta.rowLabel}</td>
+      <td className="font-medium whitespace-nowrap">{t(meta.rowLabelKey)}</td>
       <td>
         <select
           className="select select-bordered select-sm"
@@ -793,7 +840,7 @@ function AxisRow({
         >
           {FUNC_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
-              {o.value === "scroll" ? meta.scrollLabel : o.label}
+              {t(o.value === "scroll" ? meta.scrollLabelKey : o.labelKey)}
             </option>
           ))}
         </select>
@@ -837,23 +884,23 @@ function EncoderDetailRow({
   layerNames: string[] | null;
   onChange: (patch: Partial<TpAxisCfg>) => void;
 }) {
+  const t = useT();
   return (
     <tr className="bg-base-200/30">
       <td colSpan={4} className="!py-4">
         <div className="flex flex-col gap-4 max-w-3xl">
           <span className="text-xs text-base-content/60">
-            上下スワイプの＋方向（上）／−方向（下）にそれぞれ動作を割り当てます。メディアキーは
-            動作で「メディアキー（&cp）」を選ぶと一覧から選べます。
+            {t("tp.encDetail.hint")}
           </span>
           <BindingEditor
-            label="＋方向スワイプ（上）"
+            label={t("tp.bind.pos")}
             binding={axis.pos}
             layerCount={layerCount}
             layerNames={layerNames}
             onChange={(p) => onChange({ pos: { ...axis.pos, ...p } })}
           />
           <BindingEditor
-            label="−方向スワイプ（下）"
+            label={t("tp.bind.neg")}
             binding={axis.neg}
             layerCount={layerCount}
             layerNames={layerNames}
@@ -996,6 +1043,7 @@ function GesturesCard({
     patch: Partial<TpBinding>,
   ) => void;
 }) {
+  const t = useT();
   return (
     <div className="rounded-md border border-base-300 bg-base-200/40 p-4 self-stretch flex flex-col gap-4">
       <div>
@@ -1010,18 +1058,11 @@ function GesturesCard({
           ) : (
             <ChevronRight className="w-5 h-5 shrink-0" />
           )}
-          <h3 className="text-base font-bold">
-            たたく操作（タップ / ジェスチャ）
-          </h3>
+          <h3 className="text-base font-bold">{t("tp.gest.title")}</h3>
         </button>
         {open && (
           <p className="text-sm text-base-content/70 pl-6">
-            レイヤーごとに、単タップ・ダブルタップ・2本指タップ・長押しへ任意の動作を割当。未設定（&none）なら
-            ドライバ既定（タップ=左クリック /
-            2本指=右クリック）を素通しします。ダブルタップを設定すると単タップは
-            判定待ちのため少し遅延します。長押しは指を約0.35秒押したままにすると発火し、指を離すまで保持します
-            （&mo でレイヤー保持など）。
-            スクロールやカーソル移動は上の「なぞる操作（スワイプ）」で設定します。
+            {t("tp.gest.desc")}
           </p>
         )}
       </div>
@@ -1040,35 +1081,35 @@ function GesturesCard({
               >
                 <summary
                   className="font-bold text-sm cursor-pointer select-none"
-                  title="レイヤー（layer）"
+                  title={t("tp.th.layerTitle")}
                 >
-                  レイヤー {i}
-                  {name && `（${name}）`}
+                  {t("tp.gest.layer", { n: i })}
+                  {name && t("tp.gest.layerName", { name })}
                 </summary>
                 <div className="grid gap-4 md:grid-cols-1 mt-3">
                   <BindingEditor
-                    label="単タップ"
+                    label={t("tp.gest.tap")}
                     binding={l.gestures.tap}
                     layerCount={layerCount}
                     layerNames={layerNames}
                     onChange={(p) => onChange(i, "tap", p)}
                   />
                   <BindingEditor
-                    label="ダブルタップ"
+                    label={t("tp.gest.dtap")}
                     binding={l.gestures.dtap}
                     layerCount={layerCount}
                     layerNames={layerNames}
                     onChange={(p) => onChange(i, "dtap", p)}
                   />
                   <BindingEditor
-                    label="2本指タップ"
+                    label={t("tp.gest.tap2")}
                     binding={l.gestures.tap2}
                     layerCount={layerCount}
                     layerNames={layerNames}
                     onChange={(p) => onChange(i, "tap2", p)}
                   />
                   <BindingEditor
-                    label="長押し（hold）"
+                    label={t("tp.gest.hold")}
                     binding={l.gestures.hold}
                     layerCount={layerCount}
                     layerNames={layerNames}
@@ -1104,6 +1145,7 @@ function BindingEditor({
   layerNames: string[] | null;
   onChange: (patch: Partial<TpBinding>) => void;
 }) {
+  const t = useT();
   const b = binding;
   const setBehavior = (behavior: TpBehavior) => {
     // Switching behavior type resets the param/mods to a clean NONE-like slate.
@@ -1125,16 +1167,19 @@ function BindingEditor({
           value={b.behavior}
           onChange={(e) => setBehavior(Number(e.target.value) as TpBehavior)}
         >
-          {Object.entries(TP_BEH_LABELS).map(([v, l]) => (
+          {Object.entries(TP_BEH_LABEL_KEYS).map(([v, labelKey]) => (
             <option key={v} value={v}>
-              {l}
+              {t(labelKey)}
             </option>
           ))}
         </select>
         {isLayer && (
           <label className="flex items-center gap-2 text-sm">
-            <span className="text-base-content/70" title="レイヤー（layer）">
-              レイヤー
+            <span
+              className="text-base-content/70"
+              title={t("tp.th.layerTitle")}
+            >
+              {t("tp.th.layer")}
             </span>
             {layerNames ? (
               <select
@@ -1160,7 +1205,7 @@ function BindingEditor({
       </div>
       {b.behavior === TpBehavior.None && (
         <span className="text-xs text-base-content/60">
-          動作の種類を選ぶと、キーやレイヤーの選択肢がここに表示されます
+          {t("tp.bind.noneHint")}
         </span>
       )}
       {b.behavior === TpBehavior.Kp && (
@@ -1178,8 +1223,7 @@ function BindingEditor({
             collapsibleVisual
           />
           <span className="text-xs text-base-content/60">
-            キー名で検索（英語）するか、右端の ⌨
-            ボタンでキーボード画面から選べます
+            {t("tp.bind.kpHint")}
           </span>
         </>
       )}
@@ -1208,6 +1252,7 @@ function CpPicker({
   param: number;
   onChange: (patch: Partial<TpBinding>) => void;
 }) {
+  const t = useT();
   const [showOther, setShowOther] = useState(false);
   const notInList = param !== 0 && !CP_CURATED_IDS.has(param);
   const useFull = showOther || notInList;
@@ -1231,14 +1276,14 @@ function CpPicker({
         }}
       >
         <option value="" disabled>
-          選んでください…
+          {t("tp.cp.placeholder")}
         </option>
         {CP_CURATED.map((c) => (
           <option key={c.id} value={c.id}>
-            {c.label}
+            {t(c.labelKey)}
           </option>
         ))}
-        <option value={CP_OTHER}>その他（一覧から選ぶ）…</option>
+        <option value={CP_OTHER}>{t("tp.cp.other")}</option>
       </select>
       {useFull && (
         <HidUsagePicker

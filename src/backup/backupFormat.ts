@@ -23,7 +23,13 @@
  *            and stored the same way as trackball/trackpad — the raw READ wire in
  *            base64. Absent in v1-v4 files (and skipped on export from a keyboard
  *            whose firmware wasn't built with that feature).
+ *
+ * `device` (the exporting keyboard's device name) is NOT versioned: it is
+ * purely informational, optional, and ignored by restore, so adding it did not
+ * warrant a bump. Older files simply don't have it.
  */
+
+import { tr } from "../i18n";
 
 export const BACKUP_FORMAT = "torabo-tsuki-backup";
 export const BACKUP_VERSION = 5;
@@ -62,6 +68,13 @@ export interface BackupFile {
   encoder?: { wireBase64: string } | null;
   /** v5+. LED config READ wire (both sides' rule tables), base64. Optional. */
   led?: { wireBase64: string } | null;
+  /**
+   * Device name of the keyboard this file was exported from. Informational
+   * only — not used to restore anything — so it is not tied to a version;
+   * older files simply lack it. behaviorId is numbered per individual unit,
+   * so this is a hint for which keyboard a file came from.
+   */
+  device?: { name: string } | null;
 }
 
 /** Uint8Array -> base64 (WebView2 has btoa; encode via a binary string). */
@@ -93,13 +106,11 @@ export function base64ToBytes(b64: string): Uint8Array {
  */
 export function validateBackup(obj: unknown): BackupFile {
   if (!obj || typeof obj !== "object") {
-    throw new Error("ファイルの中身が不正です（JSON オブジェクトではありません）。");
+    throw new Error(tr("bk.err.notObject"));
   }
   const b = obj as Partial<BackupFile>;
   if (b.format !== BACKUP_FORMAT) {
-    throw new Error(
-      `このファイルは torabo バックアップではありません（format=${String(b.format)}）。`
-    );
+    throw new Error(tr("bk.err.notBackup", { format: String(b.format) }));
   }
   return {
     format: BACKUP_FORMAT,
@@ -115,6 +126,10 @@ export function validateBackup(obj: unknown): BackupFile {
     timing: b.timing ?? null,
     encoder: b.encoder ?? null,
     led: b.led ?? null,
+    device:
+      b.device && typeof b.device === "object" && typeof b.device.name === "string"
+        ? { name: b.device.name }
+        : null,
   };
 }
 
@@ -135,7 +150,10 @@ export function usedBehaviorIds(file: BackupFile): number[] {
  */
 export function backupCompatNote(b: BackupFile): string | null {
   if (b.version > BACKUP_VERSION) {
-    return `このファイルは新しいバックアップ版です（version=${b.version} > ${BACKUP_VERSION}）。読める範囲だけ復元します。`;
+    return tr("bk.compat.newer", {
+      version: b.version,
+      max: BACKUP_VERSION,
+    });
   }
   return null;
 }

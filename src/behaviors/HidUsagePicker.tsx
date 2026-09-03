@@ -19,6 +19,9 @@ import {
 } from "../hid-usages";
 import { useCallback, useMemo, useState } from "react";
 import { ChevronDown, Keyboard } from "lucide-react";
+import { useT } from "../i18n";
+import { useKeyLayout } from "../keyboard/KeyLayoutContext";
+import { lookupLegend, PAGE_KEYBOARD } from "../keyboard/legends";
 import { VisualKeyPicker } from "./VisualKeyPicker";
 
 export interface HidUsagePage {
@@ -48,8 +51,23 @@ export interface HidUsagePickerProps {
 
 type UsageSectionProps = HidUsagePage;
 
+/**
+ * The usage names in the HID tables are US-centric ("Keyboard 2 and At"), which
+ * is misleading on a JIS host where that key types `"`. Appending the glyph the
+ * selected layout actually produces makes the list honest without losing the
+ * official name (which is also what the type-ahead searches).
+ */
 const UsageSection = ({ id, min, max }: UsageSectionProps) => {
   const info = useMemo(() => hid_usage_page_get_ids(id), [id]);
+  const { keyLayout } = useKeyLayout();
+
+  const withLegend = (usageId: number, name: string) => {
+    if (id !== PAGE_KEYBOARD) return name;
+    const legend = lookupLegend(keyLayout, PAGE_KEYBOARD, usageId);
+    if (!legend) return name;
+    const faces = legend.shift ? `${legend.base} / ${legend.shift}` : legend.base;
+    return `${name}  [${faces}]`;
+  };
 
   let usages = useMemo(() => {
     let usages = info?.UsageIds || [];
@@ -73,7 +91,7 @@ const UsageSection = ({ id, min, max }: UsageSectionProps) => {
             className="rac-hover:bg-base-300 pl-3 relative rac-focus:bg-base-300 cursor-default select-none rac-selected:before:content-['✔'] before:absolute before:left-[0] before:top-[0]"
             id={hid_usage_from_page_and_id(id, i.Id)}
           >
-            {i.Name}
+            {withLegend(i.Id, i.Name)}
           </ListBoxItem>
         )}
       </Collection>
@@ -130,6 +148,7 @@ export const HidUsagePicker = ({
   collapsibleVisual,
   placeholder = "Search key…",
 }: HidUsagePickerProps) => {
+  const t = useT();
   const [showVisual, setShowVisual] = useState(false);
   const mods = useMemo(() => {
     let flags = value ? value >> 24 : 0;
@@ -212,7 +231,9 @@ export const HidUsagePicker = ({
           type="button"
           onPress={() => setShowVisual((v) => !v)}
           className="rounded bg-base-300 hover:bg-base-100 w-8 h-8 flex justify-center items-center shrink-0"
-          aria-label={showVisual ? "キーボードを隠す" : "キーボードを表示"}
+          aria-label={
+            showVisual ? t("sys.hid.hideKeyboard") : t("sys.hid.showKeyboard")
+          }
           aria-pressed={showVisual}
         >
           <Keyboard className="size-4" />

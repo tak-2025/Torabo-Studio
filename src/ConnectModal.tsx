@@ -3,12 +3,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RpcTransport } from "@zmkfirmware/zmk-studio-ts-client/transport/index";
 import { UserCancelledError } from "@zmkfirmware/zmk-studio-ts-client/transport/errors";
 import type { AvailableDevice } from "./backends";
-import { Bluetooth, RefreshCw } from "lucide-react";
+import { Bluetooth, Languages, RefreshCw } from "lucide-react";
 import { Key, ListBox, ListBoxItem, Selection } from "react-aria-components";
 import { useModalRef } from "./misc/useModalRef";
 import { ExternalLink } from "./misc/ExternalLink";
 import { GenericModal } from "./GenericModal";
-import { useT } from "./i18n";
+import { LANGS, useI18n } from "./i18n";
 
 export type TransportFactory = {
   label: string;
@@ -44,13 +44,16 @@ export type TransportFactory = {
 export interface ConnectModalProps {
   open?: boolean;
   transports: TransportFactory[];
-  onTransportCreated: (t: RpcTransport) => void;
+  /** The second argument says WHICH factory produced the transport, so the
+   *  caller can tailor a failure message (a USB link that never answers has a
+   *  specific, common cause; a Bluetooth one does not). */
+  onTransportCreated: (t: RpcTransport, factory?: TransportFactory) => void;
 }
 
 function deviceList(
   open: boolean,
   transports: TransportFactory[],
-  onTransportCreated: (t: RpcTransport) => void,
+  onTransportCreated: (t: RpcTransport, factory?: TransportFactory) => void,
   tr: (key: string) => string,
 ) {
   const [devices, setDevices] = useState<
@@ -102,7 +105,7 @@ function deviceList(
       if (dev) {
         dev[0]
           .pick_and_connect!.connect(dev[1])
-          .then(onTransportCreated)
+          .then((transport) => onTransportCreated(transport, dev[0]))
           .catch((e) => alert(e));
       }
     },
@@ -152,7 +155,7 @@ function deviceList(
 
 function simpleDevicePicker(
   transports: TransportFactory[],
-  onTransportCreated: (t: RpcTransport) => void,
+  onTransportCreated: (t: RpcTransport, factory?: TransportFactory) => void,
   tr: (key: string) => string,
 ) {
   const [availableDevices, setAvailableDevices] = useState<
@@ -189,7 +192,7 @@ function simpleDevicePicker(
 
           if (!ignore) {
             if (transport) {
-              onTransportCreated(transport);
+              onTransportCreated(transport, selectedTransport);
             }
             setSelectedTransport(undefined);
           }
@@ -247,8 +250,9 @@ function simpleDevicePicker(
 
   return (
     <div>
-      <p className="text-sm">{tr("connect.selectType")}</p>
-      <ul className="flex gap-3 pt-2 items-start">{connections}</ul>
+      {/* No "choose a connection type" line here: connect.intro directly above
+          already says it, and the two read as a stutter. */}
+      <ul className="flex gap-3 items-start">{connections}</ul>
       {steps && (
         <div className="mt-3 rounded border border-base-300 bg-base-200/50 p-2.5">
           <p className="text-xs font-semibold">{tr("connect.steps.title")}</p>
@@ -268,6 +272,7 @@ function simpleDevicePicker(
               onClick={async () => {
                 onTransportCreated(
                   await selectedTransport!.pick_and_connect!.connect(d),
+                  selectedTransport,
                 );
                 setSelectedTransport(undefined);
               }}
@@ -315,7 +320,7 @@ function noTransportsOptionsPrompt(tr: (key: string) => string) {
 
 function connectOptions(
   transports: TransportFactory[],
-  onTransportCreated: (t: RpcTransport) => void,
+  onTransportCreated: (t: RpcTransport, factory?: TransportFactory) => void,
   tr: (key: string) => string,
   open?: boolean,
 ) {
@@ -334,7 +339,7 @@ export const ConnectModal = ({
   transports,
   onTransportCreated,
 }: ConnectModalProps) => {
-  const t = useT();
+  const { t, lang, setLang } = useI18n();
   const dialog = useModalRef(open || false, false, false);
 
   const haveTransports = useMemo(() => transports.length > 0, [transports]);
@@ -345,7 +350,29 @@ export const ConnectModal = ({
 
   return (
     <GenericModal ref={dialog} className="max-w-xl">
-      <h1 className="text-xl">{t("connect.welcome")}</h1>
+      {/* The header's language button is behind this dialog, and a modal
+          <dialog> makes everything behind it inert — so before connecting there
+          was no way to change language at all. This is that button, close
+          enough in look and behaviour that it reads as the same control. */}
+      <div className="flex items-start justify-between gap-4">
+        <h1 className="text-xl">{t("connect.welcome")}</h1>
+        <button
+          type="button"
+          className="flex shrink-0 items-center gap-1 rounded p-1.5 hover:bg-base-300"
+          title={t("lang.label")}
+          onClick={() =>
+            setLang(
+              LANGS[(LANGS.findIndex((l) => l.id === lang) + 1) % LANGS.length]
+                .id
+            )
+          }
+        >
+          <Languages className="inline-block w-4" aria-label={t("lang.label")} />
+          <span className="text-xs font-semibold whitespace-nowrap">
+            {LANGS.find((l) => l.id === lang)?.label}
+          </span>
+        </button>
+      </div>
       {haveTransports && (
         <p className="text-sm text-base-content/70 pt-1">
           {t("connect.intro")}

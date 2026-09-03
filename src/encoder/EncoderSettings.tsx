@@ -4,8 +4,10 @@ import { ConnectionContext } from "../rpc/ConnectionContext";
 import { fetchLayerInfo } from "../rpc/keyboardInfo";
 import { encoderReadConfig, encoderWriteConfig } from "../backends";
 import { HidUsagePicker } from "../behaviors/HidUsagePicker";
-import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
+import { PanelActionBar } from "../misc/PanelActionBar";
+import { usePanelStatus } from "../misc/usePanelStatus";
 import { useT } from "../i18n";
+import { Feature, ToraboCaps, canWriteFeature } from "../caps/toraboCaps";
 import {
   EncBehavior,
   EncBinding,
@@ -29,15 +31,14 @@ const PAGE_CONSUMER = 0x0c;
 const usageFromPage = (page: number, id: number): number =>
   (page << 16) | (id & 0xffff);
 
-type Status = PanelStatus;
-
 /** The three things an encoder can do on a layer. */
 type SlotKey = "cw" | "ccw" | "btn";
 
-const SLOT_LABEL: Record<SlotKey, string> = {
-  cw: "右回し",
-  ccw: "左回し",
-  btn: "押し込み",
+/** Message keys, resolved with t() where they are rendered. */
+const SLOT_LABEL_KEY: Record<SlotKey, string> = {
+  cw: "enc.slot.cw",
+  ccw: "enc.slot.ccw",
+  btn: "enc.slot.btn",
 };
 
 function Field({
@@ -70,6 +71,7 @@ function BindingEditor({
   onChange: (b: EncBinding) => void;
   layerNames: string[] | null;
 }) {
+  const t = useT();
   const isKey = value.behavior === EncBehavior.Kp;
   const isConsumer = value.behavior === EncBehavior.Cp;
   const isLayer =
@@ -82,10 +84,10 @@ function BindingEditor({
 
   return (
     <div className="flex flex-wrap items-end gap-3">
-      <Field label="種類">
+      <Field label={t("enc.field.kind")}>
         <select
           className="select select-bordered select-sm w-36"
-          aria-label="behavior"
+          aria-label={t("enc.aria.behavior")}
           value={value.behavior}
           onChange={(e) => {
             const behavior = Number(e.target.value) as EncBehavior;
@@ -93,17 +95,17 @@ function BindingEditor({
             onChange({ behavior, mods: 0, param: 0 });
           }}
         >
-          <option value={EncBehavior.None}>なし</option>
-          <option value={EncBehavior.Kp}>キー (&amp;kp)</option>
-          <option value={EncBehavior.Cp}>メディア (&amp;cp)</option>
-          <option value={EncBehavior.Mo}>レイヤー押下中 (&amp;mo)</option>
-          <option value={EncBehavior.To}>レイヤー切替 (&amp;to)</option>
-          <option value={EncBehavior.Tog}>レイヤートグル (&amp;tog)</option>
+          <option value={EncBehavior.None}>{t("enc.beh.none")}</option>
+          <option value={EncBehavior.Kp}>{t("enc.beh.kp")}</option>
+          <option value={EncBehavior.Cp}>{t("enc.beh.cp")}</option>
+          <option value={EncBehavior.Mo}>{t("enc.beh.mo")}</option>
+          <option value={EncBehavior.To}>{t("enc.beh.to")}</option>
+          <option value={EncBehavior.Tog}>{t("enc.beh.tog")}</option>
         </select>
       </Field>
 
       {(isKey || isConsumer) && (
-        <Field label={isConsumer ? "メディア操作" : "キー"}>
+        <Field label={t(isConsumer ? "enc.field.consumer" : "enc.field.key")}>
           {/* The picker speaks ZMK's encoded usage (page << 16 | id, mods << 24),
               while the wire keeps page/mods/id apart — convert on both edges. */}
           <HidUsagePicker
@@ -135,7 +137,7 @@ function BindingEditor({
       )}
 
       {isKey && (
-        <Field label="修飾キー">
+        <Field label={t("enc.field.mods")}>
           <div className="flex gap-2">
             {(
               [
@@ -160,10 +162,10 @@ function BindingEditor({
       )}
 
       {isLayer && (
-        <Field label="レイヤー">
+        <Field label={t("enc.field.layer")}>
           <select
             className="select select-bordered select-sm w-40"
-            aria-label="layer"
+            aria-label={t("enc.aria.layer")}
             value={value.param}
             onChange={(e) =>
               onChange({ ...value, param: Number(e.target.value) })
@@ -190,18 +192,26 @@ function BindingEditor({
  * The encoder is not a keymap key, so none of this lives in the keymap: the
  * firmware resolves every action from this store at the moment it fires. That is
  * why assignments apply live, with no rebuild and no key position spent.
+ *
+ * @param caps what the connected firmware says it can do, passed down rather
+ *   than read again here (MainPanels has already asked; a second capability read
+ *   would take its turn ahead of this panel's own). Only used to decide whether
+ *   writing is safe.
  */
-export function EncoderSettings() {
+export function EncoderSettings({ caps }: { caps?: ToraboCaps | null }) {
   const t = useT();
   const { conn } = useContext(ConnectionContext);
   const [cfg, setCfg] = useState<EncConfig | null>(null);
-  const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const { status, read, write } = usePanelStatus({ onReadFailed: () => setCfg(null) });
   // getKeymap returns only the ACTIVE layers, so trailing reserved layers stay hidden.
   const [activeLayers, setActiveLayers] = useState<number | null>(null);
   const [layerNames, setLayerNames] = useState<string[] | null>(null);
-  // Layers the user switched to カスタム, so a pair that happens to match a preset
+  // Layers the user switched to Custom, so a pair that happens to match a preset
   // doesn't snap the dropdown back. UI-only; never written to the wire.
   const [customLayers, setCustomLayers] = useState<Set<number>>(new Set());
+  // The firmware's wire is newer than encodeEnc can produce: read, but never
+  // write back a config with the fields we couldn't decode stripped out.
+  const writeBlocked = !canWriteFeature(caps ?? null, Feature.Encoder);
 
   // Cleared on disconnect only. Nothing is fetched until a read is asked for:
   // see loadLayerInfo below and rpc/keyboardInfo.ts for why.
@@ -221,29 +231,17 @@ export function EncoderSettings() {
     setLayerNames(info.layerNames);
   }, [conn]);
 
-  const onRead = async () => {
-    setStatus({ kind: "busy", msg: "読み込み中…" });
-    try {
+  const onRead = () =>
+    read(async () => {
       await loadLayerInfo();
       const raw = await encoderReadConfig();
       setCfg(decodeEnc(raw));
       setCustomLayers(new Set());
-      setStatus({ kind: "ok", msg: "読み込みました" });
-    } catch (e) {
-      setCfg(null);
-      setStatus({ kind: "error", msg: String(e) });
-    }
-  };
+    });
 
-  const onWrite = async () => {
+  const onWrite = () => {
     if (!cfg) return;
-    setStatus({ kind: "busy", msg: "書き込み中…" });
-    try {
-      await encoderWriteConfig(encodeEnc(cfg));
-      setStatus({ kind: "ok", msg: "書き込みました（即反映＆本体に保存）" });
-    } catch (e) {
-      setStatus({ kind: "error", msg: String(e) });
-    }
+    return write(async () => encoderWriteConfig(encodeEnc(cfg)));
   };
 
   const patchLayer = (i: number, patch: Partial<EncLayerCfg>) => {
@@ -277,13 +275,16 @@ export function EncoderSettings() {
     <div className="flex flex-col items-start gap-4 p-4">
       <div className="text-base-content/70 text-sm">
         <p>
-          ロータリーエンコーダの<b>右回し・左回し・押し込み</b>
-          を、レイヤーごとに割り当てます。
+          {t("enc.intro.pre")}
+          <b>{t("enc.intro.strong")}</b>
+          {t("enc.intro.post")}
         </p>
         <p>
-          エンコーダはキーマップ上のキーではないため、
-          <b>キー位置を消費しません</b>。<b>書き込む</b>
-          で即反映＆本体に保存されます（再ビルド不要）。
+          {t("enc.note.pre")}
+          <b>{t("enc.note.strong1")}</b>
+          {t("enc.note.mid")}
+          <b>{t("enc.note.strong2")}</b>
+          {t("enc.note.post")}
         </p>
       </div>
 
@@ -291,6 +292,7 @@ export function EncoderSettings() {
         onRead={onRead}
         onWrite={onWrite}
         writeDisabled={!cfg || status.kind === "busy"}
+        writeBlocked={writeBlocked}
         status={status}
       />
 
@@ -304,7 +306,7 @@ export function EncoderSettings() {
             const layerLabel =
               layerNames && layerNames[i] !== i.toLocaleString()
                 ? `${i}: ${layerNames[i]}`
-                : `レイヤー ${i}`;
+                : t("enc.layerN", { n: i });
 
             return (
               <section
@@ -313,19 +315,19 @@ export function EncoderSettings() {
               >
                 <h3 className="text-sm font-semibold">{layerLabel}</h3>
 
-                <Field label="回転の機能">
+                <Field label={t("enc.field.rotation")}>
                   <select
                     className="select select-bordered select-sm w-64"
-                    aria-label={`rotation preset layer ${i}`}
+                    aria-label={t("enc.aria.preset", { n: i })}
                     value={isCustom ? "custom" : (detected as string)}
                     onChange={(e) => applyPreset(i, e.target.value)}
                   >
                     {ENC_PRESETS.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.label}
+                        {t(p.labelKey)}
                       </option>
                     ))}
-                    <option value="custom">カスタム（個別に割当）</option>
+                    <option value="custom">{t("enc.preset.custom")}</option>
                   </select>
                 </Field>
 
@@ -334,7 +336,7 @@ export function EncoderSettings() {
                     {(["cw", "ccw"] as SlotKey[]).map((slot) => (
                       <div key={slot} className="flex flex-col gap-1">
                         <span className="text-xs font-medium">
-                          {SLOT_LABEL[slot]}
+                          {t(SLOT_LABEL_KEY[slot])}
                         </span>
                         <BindingEditor
                           value={layer[slot]}
@@ -349,7 +351,9 @@ export function EncoderSettings() {
                 )}
 
                 <div className="flex flex-col gap-1 border-t border-base-300 pt-3">
-                  <span className="text-xs font-medium">{SLOT_LABEL.btn}</span>
+                  <span className="text-xs font-medium">
+                    {t(SLOT_LABEL_KEY.btn)}
+                  </span>
                   <BindingEditor
                     value={layer.btn}
                     onChange={(b) => patchLayer(i, { btn: b })}

@@ -11,7 +11,21 @@ import { Lang, messages } from "./messages";
 export type { Lang } from "./messages";
 export { LANGS } from "./messages";
 
-type TranslateFn = (key: string) => string;
+/** Values substituted into a message's `{name}` placeholders. */
+export type Vars = Record<string, string | number>;
+
+type TranslateFn = (key: string, vars?: Vars) => string;
+
+function format(template: string, vars?: Vars): string {
+  if (!vars) return template;
+  return template.replace(/\{(\w+)\}/g, (whole, name) =>
+    name in vars ? String(vars[name]) : whole
+  );
+}
+
+function lookup(lang: Lang, key: string): string {
+  return messages[lang]?.[key] ?? messages.en[key] ?? key;
+}
 
 interface I18nContextValue {
   lang: Lang;
@@ -35,8 +49,22 @@ function detectDefaultLang(): Lang {
 const I18nContext = createContext<I18nContextValue>({
   lang: "ja",
   setLang: () => {},
-  t: (key) => messages.ja[key] ?? key,
+  t: (key, vars) => format(lookup("ja", key), vars),
 });
+
+// A mirror of the provider's language for code that runs outside React — the
+// RPC and backend layers throw Errors whose text reaches the user, and they
+// have no hook to read. The provider keeps this in step on every render.
+let currentLang: Lang = "ja";
+
+/**
+ * Translate from outside a component. Only for module-level code (thrown
+ * errors, transport failures); inside a component use `useT`, which re-renders
+ * when the language changes.
+ */
+export function tr(key: string, vars?: Vars): string {
+  return format(lookup(currentLang, key), vars);
+}
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLang] = useLocalStorageState<Lang>(
@@ -44,8 +72,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     detectDefaultLang()
   );
 
+  currentLang = lang;
+
   const t = useCallback<TranslateFn>(
-    (key) => messages[lang]?.[key] ?? messages.en[key] ?? key,
+    (key, vars) => format(lookup(lang, key), vars),
     [lang]
   );
 

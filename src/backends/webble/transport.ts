@@ -2,6 +2,7 @@ import type { RpcTransport } from "@zmkfirmware/zmk-studio-ts-client/transport/i
 import { UserCancelledError } from "@zmkfirmware/zmk-studio-ts-client/transport/errors";
 
 import { registerBackend, unregisterBackend } from "../index";
+import { tr } from "../../i18n";
 import { bumpRpcActivity } from "../../rpc/activity";
 import type { ToraboBackend } from "../types";
 import { makeConfigBackend } from "./config";
@@ -234,7 +235,7 @@ function connectWithin(
   const timeout = new Promise<never>((_, reject) => {
     const timer = setTimeout(() => {
       abandoned = true;
-      reject(new Error(`接続がタイムアウトしました（${ms}ms）`));
+      reject(new Error(tr("sys.webble.connectTimeout", { ms })));
     }, ms);
     // Cleared as soon as the real connect settles either way, so an attempt
     // that finishes on time — the normal case — does not sit holding a timer
@@ -290,10 +291,7 @@ function chunkWriter(
   if (c.properties.writeWithoutResponse) {
     return (b) => c.writeValueWithoutResponse(b);
   }
-  throw new Error(
-    "ZMK Studio の RPC characteristic が書き込みに対応していません" +
-      "（ファームウェアが想定と異なります）。",
-  );
+  throw new Error(tr("sys.webble.rpcCharNotWritable"));
 }
 
 /**
@@ -310,9 +308,7 @@ export async function connect(
   options: ConnectOptions = {},
 ): Promise<RpcTransport> {
   if (!navigator.bluetooth) {
-    throw new Error(
-      "このブラウザは Web Bluetooth に対応していません（Chrome か Edge をご利用ください）。",
-    );
+    throw new Error(tr("sys.webble.unsupported"));
   }
 
   const attempt = pendingConnect
@@ -339,10 +335,7 @@ async function connectOnce(options: ConnectOptions): Promise<RpcTransport> {
         console.warn(`remembered device ${last.name} unreachable:`, e);
         last.gatt?.disconnect();
         rememberedFailed.add(last.id);
-        throw new Error(
-          "前回のキーボードに届きませんでした。" +
-            "もう一度「Bluetooth」を押すと、選択画面が開きます。",
-        );
+        throw new Error(tr("sys.webble.rememberedUnreachable"));
       }
     }
   }
@@ -353,9 +346,7 @@ async function connectOnce(options: ConnectOptions): Promise<RpcTransport> {
     // User activation can lapse before the chooser opens; nothing is wrong
     // except the timing, so say so instead of showing a SecurityError.
     if (e instanceof DOMException && e.name === "SecurityError") {
-      throw new Error(
-        "選択画面を開けませんでした。もう一度「Bluetooth」を押してください。",
-      );
+      throw new Error(tr("sys.webble.chooserFailed"));
     }
     throw e;
   }
@@ -385,11 +376,7 @@ async function attach(
     const timer = setTimeout(() => {
       if (device.gatt?.connected) device.gatt.disconnect();
       reject(
-        new Error(
-          `接続処理がタイムアウトしました（${ATTACH_TIMEOUT_MS}ms）。` +
-            "ブラウザの制約により、この状態からは再接続できません。" +
-            "ページを再読み込みしてから接続し直してください。",
-        ),
+        new Error(tr("sys.webble.attachTimeout", { ms: ATTACH_TIMEOUT_MS })),
       );
     }, ATTACH_TIMEOUT_MS);
     inner.finally(() => clearTimeout(timer));
@@ -402,7 +389,7 @@ async function attachOnce(
   device: BluetoothDevice,
   timeoutMs?: number,
 ): Promise<RpcTransport> {
-  if (!device.gatt) throw new Error("GATT を利用できないデバイスです。");
+  if (!device.gatt) throw new Error(tr("sys.webble.noGatt"));
 
   const label = device.name || "Unknown";
   const gatt = device.gatt;
@@ -420,11 +407,7 @@ async function attachOnce(
     // No Studio service at all: this really is a firmware or device question.
     await dumpGatt(server);
     server.disconnect();
-    throw new Error(
-      "ZMK Studio サービスが見つかりません" +
-        "（Studio 対応ファームウェアが書き込まれているか、" +
-        `他のアプリが接続中でないかご確認ください）: ${errText(e)}`,
-    );
+    throw new Error(tr("sys.webble.noStudioService", { error: errText(e) }));
   }
 
   try {
@@ -437,12 +420,7 @@ async function attachOnce(
     // reflashing, so do not send the user off to do that.
     await dumpGatt(server);
     server.disconnect();
-    throw new Error(
-      "キーボードとの接続が中途半端な状態です。" +
-        "いったんページを再読み込みして接続し直してください" +
-        "（それでも直らない場合は、キーボードのペアリングを削除して再ペアリングしてください）: " +
-        errText(e),
-    );
+    throw new Error(tr("sys.webble.halfOpen", { error: errText(e) }));
   }
 
   // Published before the first RPC call so a panel opened immediately after
@@ -577,7 +555,12 @@ async function attachOnce(
           // ts-client logs a rejected write and moves on, so without a readable
           // message here the failure only ever surfaces as an RPC timeout.
           throw new Error(
-            `RPC の送信に失敗しました（チャンク ${n}/${total}, ${part.length} バイト）: ${errText(e)}`,
+            tr("sys.webble.writeFailed", {
+              n,
+              total,
+              bytes: part.length,
+              error: errText(e),
+            }),
           );
         }
       }

@@ -8,6 +8,7 @@ import {
   IconDefinition,
 } from "@fortawesome/free-brands-svg-icons";
 import { DownloadIcon } from "lucide-react";
+import { useT } from "./i18n";
 import releaseData from "./data/release-data.json";
 
 type Platform = "windows" | "mac" | "linux" | "ios" | "android" | "unknown";
@@ -115,6 +116,7 @@ function getUrlFromPattern(assets: string[], pattern: RegExp) {
 }
 
 export const Download = () => {
+  const t = useT();
   const [platform, setPlatform] = useState<Platform>("unknown");
   const [showAll, setShowAll] = useState(false);
 
@@ -135,25 +137,13 @@ export const Download = () => {
       />
       <div className="text-3xl mb-1">Torabo Studio</div>
       <div className="text-md mb-1 opacity-70">
-        {HAS_RELEASE
-          ? ReleaseVersion
-          : "デスクトップ版はソースからビルドしてください"}
+        {HAS_RELEASE ? ReleaseVersion : t("sys.download.buildHint")}
       </div>
       <div className="bg-base-100 p-8 max-w-md w-full m-2 rounded-lg shadow-lg dark:shadow-xl">
         {!HAS_RELEASE && (
           <div className="text-sm leading-relaxed flex flex-col gap-3">
-            <p>
-              デスクトップ版のビルド済みバイナリは配布していません。必要な方は
-              リポジトリを fork して、ご自身でビルドしてください（手順は README
-              の「開発・ビルド」）。
-            </p>
-            <p>
-              ビルドせずに使うなら、ブラウザ版（Chrome /
-              Edge）をご利用ください。キーマップ編集は USB
-              でも Bluetooth でも行えます。トラックボール等の設定は、
-              ファームウェアがトンネル対応なら USB
-              でも使えます（旧ファームウェアでは Bluetooth 接続が必要です）。
-            </p>
+            <p>{t("sys.download.noBinaries")}</p>
+            <p>{t("sys.download.useBrowser")}</p>
           </div>
         )}
         {HAS_RELEASE && PlatformLinks[platform].length > 0 && (
@@ -169,7 +159,7 @@ export const Download = () => {
                     icon={PlatformMetadata[platform].icon}
                     className="h-6"
                   />{" "}
-                  Download for {link.name}
+                  {t("sys.download.for", { name: link.name })}
                 </a>
               ))}
             </div>
@@ -181,7 +171,9 @@ export const Download = () => {
               onClick={() => setShowAll(!showAll)}
               className="text-primary text-left hover:underline"
             >
-              {showAll ? "Hide" : "Show"} all downloads
+              {showAll
+                ? t("sys.download.hideAll")
+                : t("sys.download.showAll")}
             </button>
           )}
           {HAS_RELEASE && showAll && (
@@ -205,7 +197,7 @@ export const Download = () => {
         </div>
       </div>
       <a className="text-md hover:underline" href={REPO_URL}>
-        GitHub リポジトリ →
+        {t("sys.download.repo")}
       </a>
     </div>
   );

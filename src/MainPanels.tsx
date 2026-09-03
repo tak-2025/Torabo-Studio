@@ -10,21 +10,21 @@ import {
   RotateCw,
   Lightbulb,
   Timer,
+  Cpu,
   type LucideIcon,
 } from "lucide-react";
 
 import Keyboard from "./keyboard/Keyboard";
 import TrackballSettings from "./trackball/TrackballSettings";
-// V2 routed by user choice (2026-07-11) while the v2 effort is in progress:
-// READ works against the current (pre-flash) v1 firmware (the v2 codec
-// upgrades v1 wire), WRITE is rejected by it until the v2 FW is flashed
-// (fail-safe: the firmware keeps its config). The v1 panel stays available:
-// import TrackpadSettings from "./trackpad/TrackpadSettings";
+// The v2 panel is the only trackpad panel. It reads a v1 wire too (tpConfigV2
+// upgrades it on decode), so firmware from before the v2 effort still shows its
+// settings; a write is rejected by that firmware, which keeps its own config.
 import TrackpadSettings from "./trackpad/TrackpadSettingsV2";
 import { EncoderSettings } from "./encoder/EncoderSettings";
 import { LedSettings } from "./led/LedSettings";
 import { TimingPanel } from "./timing/TimingPanel";
 import { useToraboCaps } from "./caps/useToraboCaps";
+import { FirmwareInfoPanel } from "./caps/FirmwareInfoPanel";
 import { hasConfigAccess } from "./backends";
 import { ConnectionContext } from "./rpc/ConnectionContext";
 import { Feature, hasFeature, ledSides } from "./caps/toraboCaps";
@@ -43,7 +43,8 @@ type Panel =
   | "timing"
   | "macros"
   | "combos"
-  | "backup";
+  | "backup"
+  | "fwinfo";
 
 type TabGroupId = "edit" | "manage";
 
@@ -61,6 +62,18 @@ interface TabDef {
   feature?: Feature;
 }
 
+// Tab order, left to right. It is the array order and nothing else — the strip
+// renders this list as it stands.
+//
+// The settings tabs run roughly from the hardware you touch to the keys
+// themselves: pointing devices, then what a key can be made to do, then the
+// light on the case. Macros and Combos sit inside that run because they are
+// things you edit, not things you manage, which is also why they are in the
+// "edit" group now: the group caption and its divider are drawn by comparing
+// each tab with the one before it (isGroupStart below), so a group has to be
+// contiguous, and putting these two between Encoder and Timing while leaving
+// them in "manage" would draw the "編集 / 管理" captions three times over.
+// "Manage" is now what it says: the whole-keyboard tools at the end.
 const TABS: TabDef[] = [
   { id: "keyboard", labelKey: "tab.keymap", icon: KeyboardIcon, group: "edit" },
   {
@@ -85,11 +98,18 @@ const TABS: TabDef[] = [
     feature: Feature.Encoder,
   },
   {
-    id: "led",
-    labelKey: "tab.led",
-    icon: Lightbulb,
+    id: "macros",
+    labelKey: "tab.macros",
+    icon: Zap,
     group: "edit",
-    feature: Feature.Led,
+    feature: Feature.Macros,
+  },
+  {
+    id: "combos",
+    labelKey: "tab.combos",
+    icon: Combine,
+    group: "edit",
+    feature: Feature.Combos,
   },
   {
     id: "timing",
@@ -99,20 +119,17 @@ const TABS: TabDef[] = [
     feature: Feature.Timing,
   },
   {
-    id: "macros",
-    labelKey: "tab.macros",
-    icon: Zap,
-    group: "manage",
-    feature: Feature.Macros,
-  },
-  {
-    id: "combos",
-    labelKey: "tab.combos",
-    icon: Combine,
-    group: "manage",
-    feature: Feature.Combos,
+    id: "led",
+    labelKey: "tab.led",
+    icon: Lightbulb,
+    group: "edit",
+    feature: Feature.Led,
   },
   { id: "backup", labelKey: "tab.backup", icon: Archive, group: "manage" },
+  // No `feature`: this tab shows the descriptor itself, so it is exactly the
+  // tab you want on a keyboard whose descriptor could not be read. It says so
+  // instead of disappearing.
+  { id: "fwinfo", labelKey: "tab.fwinfo", icon: Cpu, group: "manage" },
 ];
 
 const GROUPS: { id: TabGroupId; labelKey: string }[] = [
@@ -164,7 +181,14 @@ export function MainPanels() {
   // What this particular firmware can do. null while loading, and for firmware
   // that predates the descriptor — in both cases hasFeature() answers "maybe",
   // so we show everything rather than hide a tab we simply couldn't ask about.
-  const { caps } = useToraboCaps();
+  //
+  // Handed to every panel that talks to a config service, not just the ones
+  // that vary their UI by it: each one also asks canWriteFeature() whether its
+  // wire is one this app can still safely encode.
+  //
+  // The raw bytes are for the firmware-info tab alone: it is the one place that
+  // shows the descriptor rather than acting on it.
+  const { caps, raw: capsRaw, loading: capsLoading } = useToraboCaps();
 
   // The config services need either the GATT backend or a working RPC tunnel
   // (setupToraboAccess in App.tsx). A connection that has neither — USB/serial
@@ -252,22 +276,28 @@ export function MainPanels() {
         <TrackpadSettings caps={caps} />
       </TabPanel>
       <TabPanel id="encoder" className="min-h-0 flex-1 overflow-y-auto">
-        <EncoderSettings />
+        <EncoderSettings caps={caps} />
       </TabPanel>
-      <TabPanel id="led" className="min-h-0 flex-1 overflow-y-auto">
-        <LedSettings />
+      {/* Panels are matched to tabs by id, so this order is for the reader —
+          kept the same as TABS above so the two lists can be checked off
+          against each other. */}
+      <TabPanel id="macros" className="min-h-0 flex-1 overflow-hidden">
+        <MacrosPanel caps={caps} />
+      </TabPanel>
+      <TabPanel id="combos" className="min-h-0 flex-1 overflow-hidden">
+        <CombosPanel caps={caps} />
       </TabPanel>
       <TabPanel id="timing" className="min-h-0 flex-1 overflow-hidden">
         <TimingPanel caps={caps} />
       </TabPanel>
-      <TabPanel id="macros" className="min-h-0 flex-1 overflow-hidden">
-        <MacrosPanel />
-      </TabPanel>
-      <TabPanel id="combos" className="min-h-0 flex-1 overflow-hidden">
-        <CombosPanel />
+      <TabPanel id="led" className="min-h-0 flex-1 overflow-y-auto">
+        <LedSettings caps={caps} />
       </TabPanel>
       <TabPanel id="backup" className="min-h-0 flex-1 overflow-hidden">
         <BackupPanel />
+      </TabPanel>
+      <TabPanel id="fwinfo" className="min-h-0 flex-1 overflow-hidden">
+        <FirmwareInfoPanel caps={caps} raw={capsRaw} loading={capsLoading} />
       </TabPanel>
     </Tabs>
   );

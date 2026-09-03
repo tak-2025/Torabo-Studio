@@ -1,0 +1,99 @@
+{
+  "_comment": "One line explaining what each behavior does and, where it matters, WHICH parameter is which. Keyed by the firmware's display name (the same key space as keyboard/behavior-short-names.json). The firmware's own parameter names cannot carry this: a hold-tap inherits its metadata from its two child behaviors, so Mod-Tap labels both of its fields 'Key' and never says that the first one is the hold. Behaviors not listed here fall back to the parameter names the firmware reports. Wording reviewed by the user in docs/behavior-guides-review.md.",
+  "Key Press": {
+    "ja": "選んだキーを設定する。Shift 等の修飾キーとの組み合わせも設定できる",
+    "en": "Sends the key you choose; combinations with modifiers such as Shift can be set too"
+  },
+  "Mod-Tap": {
+    "ja": "1つ目 = 長押しで効く修飾キー / 2つ目 = 単押しで出るキー",
+    "en": "1st = modifier held down / 2nd = key sent on a tap"
+  },
+  "Layer-Tap": {
+    "ja": "1つ目 = 長押し中に有効なレイヤー / 2つ目 = 単押しで出るキー",
+    "en": "1st = layer while held / 2nd = key sent on a tap"
+  },
+  "Momentary Layer": {
+    "ja": "押している間だけそのレイヤーが有効",
+    "en": "The layer is active only while held"
+  },
+  "Toggle Layer": {
+    "ja": "押すたびにそのレイヤーの ON / OFF が切り替わる",
+    "en": "Each press toggles that layer on or off"
+  },
+  "To Layer": {
+    "ja": "そのレイヤーへ移動し、他のレイヤーは解除される。マウスレイヤーから基本レイヤーへ戻すときなどに使う",
+    "en": "Switches to that layer and turns the others off — for getting back to the base layer from a mouse layer, say"
+  },
+  "Sticky Layer": {
+    "ja": "次に押したキー1回だけそのレイヤーが効く",
+    "en": "The layer applies to the next key press only"
+  },
+  "Sticky Key": {
+    "ja": "次に押したキー1回だけその修飾キーが効く",
+    "en": "The modifier applies to the next key press only"
+  },
+  "Key Toggle": {
+    "ja": "Shift 等の修飾キーを設定すると、単押しで長押し状態になる。解除はもう一度押す。通常の入力キーを設定すると事故の元",
+    "en": "With a modifier such as Shift, one tap holds it down and another releases it. Setting an ordinary key here invites accidents"
+  },
+  "Key Repeat": {
+    "ja": "直前に送ったキーをもう一度入力する",
+    "en": "Types the key you last sent again"
+  },
+  "Caps Word": {
+    "ja": "英字だけ大文字にする。数字と _ では続き、スペースや記号で自動的に解除される",
+    "en": "Capitalises letters only; digits and _ continue it, a space or punctuation ends it"
+  },
+  "Grave/Escape": {
+    "ja": "単押しは Esc。Shift か GUI を押しながらだとバッククォートになる",
+    "en": "Esc on its own; sends a backtick while Shift or GUI is held"
+  },
+  "Transparent": {
+    "ja": "このレイヤーでは何もせず、有効な他のレイヤーの設定がそのまま効く",
+    "en": "Does nothing on this layer; whatever another active layer sets applies instead"
+  },
+  "None": {
+    "ja": "何も起きない。他のレイヤーも見に行かない",
+    "en": "Nothing happens, and no other layer is consulted"
+  },
+  "Bluetooth": {
+    "ja": "プロファイルの選択・切断・消去。選択と切断はプロファイル番号を指定して設定",
+    "en": "Selects, disconnects or clears profiles; select and disconnect take a profile number"
+  },
+  "Output Selection": {
+    "ja": "キー入力の送り先を USB / Bluetooth のどちらにするか",
+    "en": "Whether key output goes to USB or Bluetooth"
+  },
+  "Dynamic Macro": {
+    "ja": "マクロタブで登録したスロット番号を指定して再生する",
+    "en": "Plays the macro slot registered on the Macros tab"
+  },
+  "Studio Unlock": {
+    "ja": "Studio からキーマップを編集できるようにする",
+    "en": "Unlocks the keyboard so Studio can edit its keymap"
+  },
+  "Bootloader": {
+    "ja": "ブートローダーで再起動し、ファームウェアの書き込みを待つ状態にする",
+    "en": "Reboots into the bootloader to await new firmware"
+  },
+  "Mouse Key Press": {
+    "ja": "マウスのボタンを押す（左・右・中ボタンなど）",
+    "en": "Presses a mouse button (left, right, middle, ...)"
+  },
+  "mouse_move": {
+    "ja": "ポインタを一定方向へ動かす。トラックボール用の内部動作",
+    "en": "Moves the pointer in a fixed direction (trackball internal)"
+  },
+  "mouse_scroll": {
+    "ja": "一定方向へスクロールする。トラックボール用の内部動作",
+    "en": "Scrolls in a fixed direction (trackball internal)"
+  },
+  "External Power": {
+    "ja": "外部電源（LED など）の ON / OFF / 切り替え",
+    "en": "Turns external power (LEDs, ...) on, off, or toggles it"
+  },
+  "Reset": {
+    "ja": "キーボードを再起動する。設定は消えない",
+    "en": "Reboots the keyboard; settings are kept"
+  }
+}

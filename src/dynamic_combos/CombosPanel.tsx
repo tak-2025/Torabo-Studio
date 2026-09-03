@@ -6,8 +6,10 @@ import { fetchLayoutKeys } from "../rpc/keyboardInfo";
 import { comboReadAll, comboWriteSlot } from "../backends";
 import { HidUsagePicker } from "../behaviors/HidUsagePicker";
 import { PhysicalLayout, KeyPosition } from "../keyboard/PhysicalLayout";
-import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
+import { PanelActionBar } from "../misc/PanelActionBar";
+import { usePanelStatus } from "../misc/usePanelStatus";
 import { useT } from "../i18n";
+import { Feature, ToraboCaps, canWriteFeature } from "../caps/toraboCaps";
 import {
   ComboConfig,
   ComboSlot,
@@ -25,8 +27,6 @@ import {
   MOD_LGUI,
 } from "./comboConfig";
 
-type Status = PanelStatus;
-
 // Keyboard/Keypad (0x07) + Consumer (0x0C) usage pages.
 const USAGE_PAGES = [{ id: 0x07 }, { id: 0x0c }];
 
@@ -34,25 +34,36 @@ const USAGE_PAGES = [{ id: 0x07 }, { id: 0x0c }];
 // combo with layer_mask=0 ("all layers") ignores this entirely.
 const LAYER_CHOICES = 10;
 
-const TARGET_LABELS: { value: ComboTarget; label: string }[] = [
-  { value: ComboTarget.KeyPress, label: "キー入力 (kp)" },
-  { value: ComboTarget.MomentaryLayer, label: "押している間モード切替 (mo)" },
-  { value: ComboTarget.ToLayer, label: "モード切替 (to)" },
-  { value: ComboTarget.ToggleLayer, label: "モード固定/解除 (tog)" },
-  { value: ComboTarget.DynamicMacro, label: "マクロ (&dmac)" },
+const TARGET_LABELS: { value: ComboTarget; key: string }[] = [
+  { value: ComboTarget.KeyPress, key: "cb.target.kp" },
+  { value: ComboTarget.MomentaryLayer, key: "cb.target.mo" },
+  { value: ComboTarget.ToLayer, key: "cb.target.to" },
+  { value: ComboTarget.ToggleLayer, key: "cb.target.tog" },
+  { value: ComboTarget.DynamicMacro, key: "cb.target.dmac" },
 ];
 
-export function CombosPanel() {
+/**
+ * @param caps what the connected firmware says it can do, passed down rather
+ *   than read again here (MainPanels has already asked; a second capability read
+ *   would take its turn ahead of this panel's own). Only used to decide whether
+ *   writing is safe.
+ */
+export function CombosPanel({ caps }: { caps?: ToraboCaps | null }) {
   const t = useT();
   const { conn } = useContext(ConnectionContext);
   const [cfg, setCfg] = useState<ComboConfig | null>(null);
-  const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const { status, setStatus, read } = usePanelStatus();
   // Unregistered (empty + disabled) combos are hidden; "add" reveals the next
   // empty slot, like adding a keymap layer.
   const [revealed, setRevealed] = useState<Set<number>>(new Set());
   // Physical layout for the visual key-position picker (each key's index IS its
   // key position). Fetched over the Studio RPC, same source as the keymap tab.
   const [positions, setPositions] = useState<KeyPosition[] | null>(null);
+  // The firmware's wire is newer than encodeSlot can produce: read, but never
+  // write back a slot with the fields we couldn't decode stripped out. This
+  // panel saves per slot rather than through one write button, so every save
+  // control below is disabled and the action bar carries the explanation.
+  const writeBlocked = !canWriteFeature(caps ?? null, Feature.Combos);
 
   // Cleared on disconnect only. Nothing is fetched until a read is asked for:
   // see loadLayout below and rpc/keyboardInfo.ts for why.
@@ -79,31 +90,27 @@ export function CombosPanel() {
       setStatus({ kind: "error", msg: t("status.notConnected") });
       return;
     }
-    setStatus({ kind: "busy", msg: t("status.reading") });
-    try {
+    await read(async () => {
       await loadLayout();
       setCfg(decodeCombos(await comboReadAll()));
       setRevealed(new Set());
-      setStatus({ kind: "ok", msg: t("status.loaded") });
-    } catch (e) {
-      setStatus({ kind: "error", msg: t("status.error") + String(e) });
-    }
-  }, [conn, loadLayout, t]);
+    });
+  }, [conn, loadLayout, read, setStatus, t]);
 
   const saveSlot = useCallback(
     async (idx: number, slot: ComboSlot) => {
-      setStatus({ kind: "busy", msg: `コンボ ${idx} を書き込み中…` });
+      setStatus({ kind: "busy", msg: t("cb.writing", { idx }) });
       try {
         await comboWriteSlot(encodeSlot(idx, slot));
         setStatus({
           kind: "ok",
-          msg: `コンボ ${idx} を保存しました（次のアイドルで反映＆本体に保存）。`,
+          msg: t("cb.saved", { idx }),
         });
       } catch (e) {
         setStatus({ kind: "error", msg: t("status.error") + String(e) });
       }
     },
-    [t],
+    [setStatus, t],
   );
 
   const updateSlot = (idx: number, slot: ComboSlot) =>
@@ -139,20 +146,14 @@ export function CombosPanel() {
   return (
     <div className="p-4 overflow-auto flex flex-col gap-4 h-full">
       <div className="flex flex-col gap-1">
-        <h2 className="text-fluid-xl font-bold">
-          ダイナミックコンボ
-        </h2>
-        <p className="text-sm text-base-content/70">
-          複数のキー位置を同時押しすると 1
-          つの動作（キー入力・モード切替・マクロ）を発火します。
-          キー位置の番号は keymap のキー位置（0 始まり）です。空 or
-          無効のコンボは何も起きません。
-        </p>
+        <h2 className="text-fluid-xl font-bold">{t("cb.title")}</h2>
+        <p className="text-sm text-base-content/70">{t("cb.desc")}</p>
       </div>
 
       <PanelActionBar
         onRead={onRead}
         readLabel={t("actionBar.readPlain")}
+        writeBlocked={writeBlocked}
         status={status}
       />
 
@@ -168,13 +169,11 @@ export function CombosPanel() {
               layoutPositions={positions}
               onChange={(s) => updateSlot(idx, s)}
               onSave={(s) => saveSlot(idx, s)}
+              saveDisabled={writeBlocked}
             />
           ))}
           {visible.length === 0 && (
-            <p className="text-sm text-base-content/50">
-              登録済みのコンボはありません。下の「＋
-              コンボを追加」で作成できます。
-            </p>
+            <p className="text-sm text-base-content/50">{t("cb.none")}</p>
           )}
           {visible.length < CB_SLOTS && (
             <button
@@ -182,7 +181,7 @@ export function CombosPanel() {
               className="btn btn-outline btn-sm gap-1 self-start"
               onClick={addCombo}
             >
-              <Plus size={16} /> コンボを追加
+              <Plus size={16} /> {t("cb.add")}
             </button>
           )}
         </div>
@@ -197,13 +196,17 @@ function ComboEditor({
   layoutPositions,
   onChange,
   onSave,
+  saveDisabled,
 }: {
   index: number;
   slot: ComboSlot;
   layoutPositions: KeyPosition[] | null;
   onChange: (slot: ComboSlot) => void;
   onSave: (slot: ComboSlot) => void;
+  /** Firmware newer than this app's wire — the panel's action bar says why. */
+  saveDisabled?: boolean;
 }) {
+  const t = useT();
   const set = (patch: Partial<ComboSlot>) => onChange({ ...slot, ...patch });
   const [showPicker, setShowPicker] = useState(false);
   const [manual, setManual] = useState(0);
@@ -234,9 +237,11 @@ function ComboEditor({
     <div className="rounded-md border border-base-300 p-3 self-start min-w-[34rem]">
       <div className="flex items-center justify-between gap-3 mb-2">
         <span className="font-bold">
-          コンボ {index}
+          {t("cb.slotTitle", { idx: index })}
           {!slot.enabled && (
-            <span className="opacity-50 text-sm font-normal"> （無効）</span>
+            <span className="opacity-50 text-sm font-normal">
+              {t("cb.disabledSuffix")}
+            </span>
           )}
         </span>
         <div className="flex items-center gap-3">
@@ -247,33 +252,38 @@ function ComboEditor({
               checked={slot.enabled}
               onChange={(e) => set({ enabled: e.target.checked })}
             />
-            有効
+            {t("cb.enabled")}
           </label>
           <button
             type="button"
             className="btn btn-sm btn-success gap-1"
             onClick={() => onSave(slot)}
+            disabled={saveDisabled}
           >
-            <Save size={16} /> 保存
+            <Save size={16} /> {t("common.save")}
           </button>
         </div>
       </div>
 
       {/* key positions */}
       <div className="flex items-start gap-2 mb-3">
-        <span className="text-sm font-medium w-24 pt-1">キー位置</span>
+        <span className="text-sm font-medium w-24 pt-1">
+          {t("cb.keyPositions")}
+        </span>
         <div className="flex flex-col gap-2 flex-1">
           {/* selected positions as removable chips */}
           <div className="flex items-center gap-2 flex-wrap">
             {slot.positions.length === 0 && (
-              <span className="text-xs text-base-content/50">未選択</span>
+              <span className="text-xs text-base-content/50">
+                {t("cb.unselected")}
+              </span>
             )}
             {slot.positions.map((p, i) => (
               <span key={i} className="badge badge-primary gap-1 font-mono">
                 {p}
                 <button
                   type="button"
-                  aria-label={`位置 ${p} を削除`}
+                  aria-label={t("cb.removePos", { pos: p })}
                   onClick={() => removePos(i)}
                 >
                   <Trash2 size={12} />
@@ -286,7 +296,7 @@ function ComboEditor({
                 className="btn btn-xs btn-outline gap-1"
                 onClick={() => setShowPicker((v) => !v)}
               >
-                {showPicker ? "レイアウトを閉じる" : "レイアウトで選ぶ"}
+                {showPicker ? t("cb.closeLayout") : t("cb.pickLayout")}
               </button>
             )}
             {/* manual number add (fallback) */}
@@ -299,7 +309,7 @@ function ComboEditor({
                 onChange={(e) =>
                   setManual(Math.max(0, Number(e.target.value) | 0))
                 }
-                aria-label="番号で位置を追加"
+                aria-label={t("cb.addByNumberAria")}
               />
               <button
                 type="button"
@@ -307,7 +317,7 @@ function ComboEditor({
                 onClick={addManual}
                 disabled={slot.positions.length >= CB_MAX_POS}
               >
-                <Plus size={12} /> 番号で追加
+                <Plus size={12} /> {t("cb.addByNumber")}
               </button>
             </span>
           </div>
@@ -327,7 +337,7 @@ function ComboEditor({
 
           {slot.positions.length < 2 && (
             <span className="text-xs text-warning">
-              コンボには 2 つ以上のキー位置が必要です（最大 {CB_MAX_POS}）。
+              {t("cb.needTwo", { max: CB_MAX_POS })}
             </span>
           )}
         </div>
@@ -335,10 +345,10 @@ function ComboEditor({
 
       {/* target behavior */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <span className="text-sm font-medium w-24">発火する動作</span>
+        <span className="text-sm font-medium w-24">{t("cb.action")}</span>
         <select
           className="select select-bordered select-sm"
-          aria-label="発火する動作"
+          aria-label={t("cb.action")}
           value={slot.targetType}
           onChange={(e) =>
             set({
@@ -347,9 +357,9 @@ function ComboEditor({
             })
           }
         >
-          {TARGET_LABELS.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
+          {TARGET_LABELS.map((target) => (
+            <option key={target.value} value={target.value}>
+              {t(target.key)}
             </option>
           ))}
         </select>
@@ -359,7 +369,7 @@ function ComboEditor({
       {/* timing + layers */}
       <div className="flex items-center gap-4 flex-wrap text-sm">
         <label className="flex items-center gap-1">
-          <span className="font-medium">タイムアウト</span>
+          <span className="font-medium">{t("cb.timeout")}</span>
           <input
             type="number"
             min={0}
@@ -378,14 +388,14 @@ function ComboEditor({
               type="button"
               className="btn btn-xs btn-warning"
               onClick={() => set({ timeoutMs: 50 })}
-              title="同時押しと認識する制限時間。0 だと発火しません"
+              title={t("cb.timeoutZeroTitle")}
             >
-              0だと発火しません → 50ms
+              {t("cb.timeoutZeroFix")}
             </button>
           )}
         </label>
         <label className="flex items-center gap-1">
-          <span className="font-medium">直前アイドル</span>
+          <span className="font-medium">{t("cb.priorIdle")}</span>
           <input
             type="number"
             min={0}
@@ -409,8 +419,8 @@ function ComboEditor({
       </div>
 
       <div className="flex items-start gap-2 mt-3 flex-wrap text-sm">
-        <span className="font-medium w-24" title="レイヤー（layer）">
-          有効モード
+        <span className="font-medium w-24" title={t("cb.modeTitle")}>
+          {t("cb.activeModes")}
         </span>
         <div className="flex items-center gap-2 flex-wrap">
           <label className="flex items-center gap-1">
@@ -420,7 +430,7 @@ function ComboEditor({
               checked={allLayers}
               onChange={(e) => set({ layerMask: e.target.checked ? 0 : 1 })}
             />
-            全モード
+            {t("cb.allModes")}
           </label>
           {!allLayers &&
             Array.from({ length: LAYER_CHOICES }, (_, l) => (
@@ -447,6 +457,7 @@ function TargetParam({
   slot: ComboSlot;
   set: (patch: Partial<ComboSlot>) => void;
 }) {
+  const t = useT();
   if (slot.targetType === ComboTarget.KeyPress) {
     const { base, mods } = splitKeycode(slot.param1);
     const setMod = (bit: number, on: boolean) =>
@@ -483,8 +494,11 @@ function TargetParam({
     );
   }
 
-  const label =
-    slot.targetType === ComboTarget.DynamicMacro ? "マクロ slot" : "モード番号";
+  const label = t(
+    slot.targetType === ComboTarget.DynamicMacro
+      ? "cb.macroSlot"
+      : "cb.modeNumber",
+  );
   return (
     <label className="flex items-center gap-1 text-sm">
       <span className="opacity-70">{label}</span>

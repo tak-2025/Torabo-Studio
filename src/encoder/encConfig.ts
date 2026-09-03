@@ -17,6 +17,8 @@
  * with tpConfigV2.ts on purpose — the two wires must be free to diverge.
  */
 
+import { tr } from "../i18n";
+
 export const ENC_MAGIC = 0x6e65; // "en"
 export const ENC_VERSION = 1;
 
@@ -97,7 +99,8 @@ export function encWireLen(layerCount: number): number {
 
 export interface EncPreset {
   id: string;
-  label: string;
+  /** Message key — the panel resolves it with t() so presets stay bilingual. */
+  labelKey: string;
   cw: EncBinding;
   ccw: EncBinding;
 }
@@ -105,49 +108,49 @@ export interface EncPreset {
 export const ENC_PRESETS: EncPreset[] = [
   {
     id: "volume",
-    label: "音量",
+    labelKey: "enc.preset.volume",
     cw: bind(EncBehavior.Cp, HID.C_VOL_UP),
     ccw: bind(EncBehavior.Cp, HID.C_VOL_DN),
   },
   {
     id: "brightness",
-    label: "画面の明るさ",
+    labelKey: "enc.preset.brightness",
     cw: bind(EncBehavior.Cp, HID.C_BRI_UP),
     ccw: bind(EncBehavior.Cp, HID.C_BRI_DN),
   },
   {
     id: "track",
-    label: "曲送り / 曲戻し",
+    labelKey: "enc.preset.track",
     cw: bind(EncBehavior.Cp, HID.C_NEXT),
     ccw: bind(EncBehavior.Cp, HID.C_PREV),
   },
   {
     id: "zoom",
-    label: "ズーム (Ctrl +/-)",
+    labelKey: "enc.preset.zoom",
     cw: bind(EncBehavior.Kp, HID.KC_EQUAL, EncMod.LCTL),
     ccw: bind(EncBehavior.Kp, HID.KC_MINUS, EncMod.LCTL),
   },
   {
     id: "page",
-    label: "ページ送り (PgUp/PgDn)",
+    labelKey: "enc.preset.page",
     cw: bind(EncBehavior.Kp, HID.KC_PG_DN),
     ccw: bind(EncBehavior.Kp, HID.KC_PG_UP),
   },
   {
     id: "updown",
-    label: "上下キー",
+    labelKey: "enc.preset.updown",
     cw: bind(EncBehavior.Kp, HID.KC_DOWN),
     ccw: bind(EncBehavior.Kp, HID.KC_UP),
   },
   {
     id: "leftright",
-    label: "左右キー",
+    labelKey: "enc.preset.leftright",
     cw: bind(EncBehavior.Kp, HID.KC_RIGHT),
     ccw: bind(EncBehavior.Kp, HID.KC_LEFT),
   },
   {
     id: "browser",
-    label: "ブラウザ 進む / 戻る",
+    labelKey: "enc.preset.browser",
     cw: bind(EncBehavior.Cp, HID.AC_FORWARD),
     ccw: bind(EncBehavior.Cp, HID.AC_BACK),
   },
@@ -173,7 +176,7 @@ export function defaultLayer(): EncLayerCfg {
 /** Throws on anything we don't recognise, rather than half-decoding it. */
 export function decodeEnc(buf: Uint8Array): EncConfig {
   if (buf.length < ENC_HDR) {
-    throw new Error(`encoder config too short (${buf.length} B)`);
+    throw new Error(tr("enc.err.short", { n: buf.length }));
   }
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const magic = dv.getUint16(0, true);
@@ -181,14 +184,14 @@ export function decodeEnc(buf: Uint8Array): EncConfig {
   const layerCount = dv.getUint8(3);
 
   if (magic !== ENC_MAGIC) {
-    throw new Error(`encoder config: bad magic 0x${magic.toString(16)}`);
+    throw new Error(tr("enc.err.magic", { magic: magic.toString(16) }));
   }
   if (version !== ENC_VERSION) {
-    throw new Error(`encoder config: unsupported version ${version}`);
+    throw new Error(tr("enc.err.version", { version }));
   }
   const need = encWireLen(layerCount);
   if (buf.length < need) {
-    throw new Error(`encoder config truncated: ${buf.length} B, need ${need}`);
+    throw new Error(tr("enc.err.truncated", { got: buf.length, need }));
   }
 
   const readBind = (o: number): EncBinding => {

@@ -10,6 +10,7 @@ import type { Notification } from "@zmkfirmware/zmk-studio-ts-client/studio";
 import { ConnectionState, ConnectionContext } from "./rpc/ConnectionContext";
 import { Dispatch, useCallback, useEffect, useState } from "react";
 import { ConnectModal, TransportFactory } from "./ConnectModal";
+import { tr, useT } from "./i18n";
 
 import type { RpcTransport } from "@zmkfirmware/zmk-studio-ts-client/transport/index";
 import { connect as serial_connect } from "@zmkfirmware/zmk-studio-ts-client/transport/serial";
@@ -33,6 +34,7 @@ import {
 import type { ToraboBackend } from "./backends";
 import { makeRpcBackend, probeRpcTunnel } from "./backends/rpc/config";
 import MainPanels from "./MainPanels";
+import { MacroNamesProvider } from "./dynamic_macros/MacroNamesContext";
 import { UndoRedoContext, useUndoRedo } from "./undoRedo";
 import { usePub, useSub } from "./usePubSub";
 import { LockState } from "@zmkfirmware/zmk-studio-ts-client/core";
@@ -95,7 +97,12 @@ const TRANSPORTS: TransportFactory[] = [
         // moment, and only on what ZMK happens to broadcast. Neither is
         // guaranteed, so there is always a way to see everything.
         {
-          label: "Bluetooth（すべての機器）",
+          // A getter, not a plain string: TRANSPORTS is built once at module
+          // load, before the language is known, and must still follow the
+          // header's language toggle. Every other label here is a proper noun.
+          get label() {
+            return tr("sys.transport.bluetoothAll");
+          },
           isWireless: true,
           noteKey: "connect.note.webBluetoothAll",
           connect: () => webble_connect({ allDevices: true }),
@@ -300,6 +307,8 @@ async function connect(
   setConn: Dispatch<ConnectionState>,
   setConnectedDeviceName: Dispatch<string | undefined>,
   signal: AbortSignal,
+  t: (key: string) => string,
+  isUsb?: boolean,
 ) {
   let conn = await create_rpc_connection(transport, { signal });
 
@@ -319,8 +328,15 @@ async function connect(
     // for webble that means removing its listeners, unregistering its
     // backend, and disconnecting the GATT server.
     transport.abortController.abort();
+    // A USB link that opens but never answers has one overwhelmingly common
+    // cause, and "Failed to connect" sends people looking everywhere else for
+    // it: ZMK serves Studio only on the endpoint it currently has selected
+    // (app/src/studio/rpc.c refresh_selected_transport stops the other one), and
+    // with both USB and BLE up that is whatever `endpoints/preferred` says. A
+    // keyboard whose output is on Bluetooth is silent over USB, and the setting
+    // lives in its own NVS entry, so it survives keymap edits and reflashes.
     // TODO: Show a proper toast/alert not using `window.alert`
-    window.alert("Failed to connect to the chosen device");
+    window.alert(t(isUsb ? "connect.failedUsb" : "connect.failed"));
     return;
   }
 
@@ -343,6 +359,7 @@ async function connect(
 }
 
 function App() {
+  const t = useT();
   const [conn, setConn] = useState<ConnectionState>({ conn: null });
   const [connectedDeviceName, setConnectedDeviceName] = useState<
     string | undefined
@@ -471,12 +488,19 @@ function App() {
   }, [conn]);
 
   const onConnect = useCallback(
-    (t: RpcTransport) => {
+    (transport: RpcTransport, factory?: TransportFactory) => {
       const ac = new AbortController();
       setConnectionAbort(ac);
-      connect(t, setConn, setConnectedDeviceName, ac.signal);
+      connect(
+        transport,
+        setConn,
+        setConnectedDeviceName,
+        ac.signal,
+        t,
+        factory?.isUsb,
+      );
     },
-    [setConn, setConnectedDeviceName, setConnectedDeviceName],
+    [setConn, setConnectedDeviceName, t],
   );
 
   return (
@@ -506,7 +530,13 @@ function App() {
               onDisconnect={disconnect}
               onResetSettings={resetSettings}
             />
-            <MainPanels />
+            {/* Macro slot names travel from the macros panel to the keymap
+                board's `&dmac` keycaps; both live inside MainPanels but have
+                no other reason to know about each other. See
+                dynamic_macros/MacroNamesContext. */}
+            <MacroNamesProvider>
+              <MainPanels />
+            </MacroNamesProvider>
             <AppFooter
               onShowAbout={() => setShowAbout(true)}
               onShowLicenseNotice={() => setShowLicenseNotice(true)}

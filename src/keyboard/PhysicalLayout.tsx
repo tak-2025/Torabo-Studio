@@ -10,6 +10,8 @@ import { Key } from "./Key";
 export type KeyPosition = PropsWithChildren<{
   id: string;
   header?: string;
+  hold?: string;
+  muted?: boolean;
   width: number;
   height: number;
   x: number;

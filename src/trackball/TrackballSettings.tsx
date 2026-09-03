@@ -3,9 +3,15 @@ import { Fragment, useCallback, useContext, useEffect, useState } from "react";
 import { ConnectionContext } from "../rpc/ConnectionContext";
 import { fetchLayerInfo } from "../rpc/keyboardInfo";
 import { trackballReadConfig, trackballWriteConfig } from "../backends";
-import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
+import { PanelActionBar } from "../misc/PanelActionBar";
+import { usePanelStatus } from "../misc/usePanelStatus";
 import { useT } from "../i18n";
-import { ToraboCaps, hasTrackballCoast } from "../caps/toraboCaps";
+import {
+  Feature,
+  ToraboCaps,
+  canWriteFeature,
+  hasTrackballCoast,
+} from "../caps/toraboCaps";
 import {
   AxisCfg,
   CoastCfg,
@@ -13,15 +19,13 @@ import {
   encodeZtc,
   LayerCfg,
   Role,
-  ROLE_LABELS,
+  ROLE_LABEL_KEYS,
   ZTC_COAST_FRICTION_MAX,
   ZTC_COAST_FRICTION_MIN,
   ZTC_COAST_THRESHOLD_MAX,
   ZTC_COAST_THRESHOLD_MIN,
   ZtcConfig,
 } from "./ztcConfig";
-
-type Status = PanelStatus;
 
 function patchAxis(
   cfg: ZtcConfig,
@@ -49,14 +53,14 @@ function patchLayer(
 /**
  * @param caps what the connected firmware says it can do, passed down rather
  *   than read again here (MainPanels has already asked; a second capability read
- *   would take its turn ahead of this panel's own). Only used to decide whether
- *   the inertial-scroll section is offered.
+ *   would take its turn ahead of this panel's own). Decides whether the
+ *   inertial-scroll section is offered, and whether writing is safe at all.
  */
 export function TrackballSettings({ caps }: { caps?: ToraboCaps | null }) {
   const t = useT();
   const { conn } = useContext(ConnectionContext);
   const [cfg, setCfg] = useState<ZtcConfig | null>(null);
-  const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const { status, read, write } = usePanelStatus({ onReadFailed: () => setCfg(null) });
   // Number of real (claimed) keymap layers. The trackball config has a fixed,
   // compile-time layer count that also covers the torabo-reserved-layers
   // (status="reserved", appended after the real layers). getKeymap returns only
@@ -65,6 +69,9 @@ export function TrackballSettings({ caps }: { caps?: ToraboCaps | null }) {
   // Layer names by index (name || index fallback). null when not connected / RPC
   // failed → layer inputs fall back to plain number inputs. UI-only.
   const [layerNames, setLayerNames] = useState<string[] | null>(null);
+  // The firmware's wire is newer than encodeZtc can produce: read, but never
+  // write back a config with the fields we couldn't decode stripped out.
+  const writeBlocked = !canWriteFeature(caps ?? null, Feature.Trackball);
 
   // Cleared on disconnect only. Nothing is fetched until a read is asked for:
   // see loadLayerInfo below and rpc/keyboardInfo.ts for why.
@@ -83,27 +90,19 @@ export function TrackballSettings({ caps }: { caps?: ToraboCaps | null }) {
     setLayerNames(info.layerNames);
   }, [conn]);
 
-  const onRead = useCallback(async () => {
-    setStatus({ kind: "busy", msg: t("status.reading") });
-    try {
-      await loadLayerInfo();
-      setCfg(decodeZtc(await trackballReadConfig()));
-      setStatus({ kind: "ok", msg: t("status.loaded") });
-    } catch (e) {
-      setStatus({ kind: "error", msg: t("status.error") + String(e) });
-    }
-  }, [loadLayerInfo, t]);
+  const onRead = useCallback(
+    () =>
+      read(async () => {
+        await loadLayerInfo();
+        setCfg(decodeZtc(await trackballReadConfig()));
+      }),
+    [loadLayerInfo, read]
+  );
 
-  const onWrite = useCallback(async () => {
+  const onWrite = useCallback(() => {
     if (!cfg) return;
-    setStatus({ kind: "busy", msg: t("status.saving") });
-    try {
-      await trackballWriteConfig(encodeZtc(cfg));
-      setStatus({ kind: "ok", msg: t("status.applied") });
-    } catch (e) {
-      setStatus({ kind: "error", msg: t("status.error") + String(e) });
-    }
-  }, [cfg, t]);
+    return write(async () => trackballWriteConfig(encodeZtc(cfg)));
+  }, [cfg, write]);
 
   if (!conn) {
     return (
@@ -121,18 +120,18 @@ export function TrackballSettings({ caps }: { caps?: ToraboCaps | null }) {
   return (
     <div className="p-4 overflow-auto flex flex-col gap-4 h-full">
       <div className="flex flex-col gap-1">
-        <h2 className="text-fluid-xl font-bold">
-          トラックボール設定
-        </h2>
+        <h2 className="text-fluid-xl font-bold">{t("tb.title")}</h2>
         <p className="text-sm text-base-content/70">
-          ① <b>読み込む</b>で現在値を取得 → ② 表の値を変更 → ③ <b>書き込む</b>
-          で即反映＆保存
+          {t("tb.steps.pre")} <b>{t("tb.steps.read")}</b>
+          {t("tb.steps.mid")} <b>{t("tb.steps.write")}</b>
+          {t("tb.steps.post")}
         </p>
       </div>
       <PanelActionBar
         onRead={onRead}
         onWrite={onWrite}
         writeDisabled={!cfg || status.kind === "busy"}
+        writeBlocked={writeBlocked}
         status={status}
       />
 
@@ -142,9 +141,9 @@ export function TrackballSettings({ caps }: { caps?: ToraboCaps | null }) {
         <>
           <div className="flex flex-wrap items-end gap-6 rounded-md border border-base-300 bg-base-200/40 p-4 self-stretch">
             <h3 className="font-semibold text-base w-full">
-              一時レイヤー切替（ボール操作で切替）
+              {t("tb.temp.title")}
             </h3>
-            <Field label="切替先レイヤー">
+            <Field label={t("tb.temp.target")}>
               {layerNames ? (
                 <select
                   className="select select-bordered input-md w-40 text-base"
@@ -167,7 +166,7 @@ export function TrackballSettings({ caps }: { caps?: ToraboCaps | null }) {
                 />
               )}
             </Field>
-            <Field label="戻る時間（ms, 50〜30000）">
+            <Field label={t("tb.temp.timeout")}>
               <NumIn
                 big
                 min={50}
@@ -191,7 +190,8 @@ export function TrackballSettings({ caps }: { caps?: ToraboCaps | null }) {
             />
           ) : (
             <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm leading-relaxed text-base-content/80 self-start max-w-2xl">
-              <span className="font-bold">{t("coast.title")}</span>：
+              <span className="font-bold">{t("coast.title")}</span>
+              {t("common.labelSep")}
               {t("coast.unavailable")}
             </div>
           )}
@@ -202,29 +202,24 @@ export function TrackballSettings({ caps }: { caps?: ToraboCaps | null }) {
             </summary>
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 mt-2">
               <dt className="font-semibold text-base-content whitespace-nowrap">
-                動作
+                {t("tb.term.role")}
               </dt>
-              <dd>
-                Move=カーソル移動 / Scroll=スクロール /
-                Off=無効（その軸を止める）
-              </dd>
+              <dd>{t("tb.term.roleDesc")}</dd>
               <dt className="font-semibold text-base-content whitespace-nowrap">
-                向き
+                {t("tb.term.dir")}
               </dt>
-              <dd>reverse にチェックで逆方向</dd>
+              <dd>{t("tb.term.dirDesc")}</dd>
               <dt className="font-semibold text-base-content whitespace-nowrap">
-                速度(÷)
+                {t("tb.term.speed")}
               </dt>
-              <dd>1=最速、数字が大きいほど遅い（最大32）</dd>
+              <dd>{t("tb.term.speedDesc")}</dd>
               <dt
                 className="font-semibold text-base-content whitespace-nowrap"
-                title="レイヤー（layer）"
+                title={t("tb.term.layer")}
               >
-                一時レイヤー
+                {t("tb.term.temp")}
               </dt>
-              <dd>
-                ✓のレイヤーでボールを動かすと、上の「切替先レイヤー」へ一時的に切替（レイヤー＝Fnキーのように切り替わるキー配置のセット）
-              </dd>
+              <dd>{t("tb.term.tempDesc")}</dd>
             </dl>
           </details>
           {/* shrink-0: without it, this overflow container gets min-height:0 and
@@ -235,27 +230,27 @@ export function TrackballSettings({ caps }: { caps?: ToraboCaps | null }) {
             <table className="table table-zebra w-auto [&_th]:text-left [&_td]:text-left [&_th]:px-5 [&_th]:py-3 [&_td]:px-5 [&_td]:py-3 [&_td]:text-sm [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:bg-base-200 [&_thead_th]:z-10 [&_tbody_tr:hover]:bg-base-200/50">
               <thead>
                 <tr className="bg-base-200">
-                  <th title="レイヤー（layer）">レイヤー</th>
-                  <th>軸</th>
+                  <th title={t("tb.term.layer")}>{t("tb.th.layer")}</th>
+                  <th>{t("tb.th.axis")}</th>
                   <th>
-                    動作
+                    {t("tb.term.role")}
                     <br />
                     <span className="font-normal opacity-60">Role</span>
                   </th>
                   <th>
-                    向き
+                    {t("tb.term.dir")}
                     <br />
                     <span className="font-normal opacity-60">reverse</span>
                   </th>
                   <th>
-                    速度(÷)
+                    {t("tb.term.speed")}
                     <br />
                     <span className="font-normal opacity-60">
-                      大きいほど遅い
+                      {t("tb.th.slower")}
                     </span>
                   </th>
-                  <th title="レイヤー（layer）">
-                    一時レイヤー
+                  <th title={t("tb.term.layer")}>
+                    {t("tb.term.temp")}
                     <br />
                     <span className="font-normal opacity-60">temp</span>
                   </th>
@@ -305,8 +300,7 @@ export function TrackballSettings({ caps }: { caps?: ToraboCaps | null }) {
           </div>
 
           <div className="rounded-md border border-info/40 bg-info/10 px-4 py-3 text-sm leading-relaxed text-base-content/80 self-start max-w-2xl">
-            書き込みは即反映され、本体に保存されます。空・不正な設定は必ず通常のカーソル移動に戻ります
-            （カーソルが止まることはありません）。既定値は元の挙動（レイヤー0/1=移動、2=横スクロール、3=縦スクロール）。
+            {t("tb.writeNote")}
           </div>
         </>
       )}
@@ -440,6 +434,7 @@ function AxisRow({
   tempCell?: React.ReactNode;
   firstOfLayer?: boolean;
 }) {
+  const t = useT();
   return (
     <tr className={firstOfLayer ? "border-t-2 border-base-300" : ""}>
       {layerCell !== undefined && (
@@ -460,9 +455,9 @@ function AxisRow({
           value={axis.role}
           onChange={(e) => onChange({ role: Number(e.target.value) as Role })}
         >
-          {Object.entries(ROLE_LABELS).map(([v, label]) => (
+          {Object.entries(ROLE_LABEL_KEYS).map(([v, key]) => (
             <option key={v} value={v}>
-              {label}
+              {t(key)}
             </option>
           ))}
         </select>

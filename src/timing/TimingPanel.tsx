@@ -4,12 +4,18 @@ import { ConnectionContext } from "../rpc/ConnectionContext";
 import { fetchLayoutKeys } from "../rpc/keyboardInfo";
 import { timingReadConfig, timingWriteConfig } from "../backends";
 import { PhysicalLayout, KeyPosition } from "../keyboard/PhysicalLayout";
-import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
+import { PanelActionBar } from "../misc/PanelActionBar";
+import { usePanelStatus } from "../misc/usePanelStatus";
 import { useT } from "../i18n";
-import { ToraboCaps, hasSplitDebounce } from "../caps/toraboCaps";
 import {
-  HT_FLAVOR_LABELS,
-  HT_NODE_LABELS,
+  Feature,
+  ToraboCaps,
+  canWriteFeature,
+  hasSplitDebounce,
+} from "../caps/toraboCaps";
+import {
+  HT_FLAVOR_LABEL_KEYS,
+  HT_NODE_LABEL_KEYS,
   HT_PRESETS,
   HtFlavor,
   HtNode,
@@ -21,8 +27,6 @@ import {
   encodeTiming,
   matchHtPreset,
 } from "./timingConfig";
-
-type Status = PanelStatus;
 
 function Field({
   label,
@@ -109,6 +113,7 @@ function PositionPicker({
   layoutPositions: KeyPosition[] | null;
   onChange: (positions: number[]) => void;
 }) {
+  const t = useT();
   const [showPicker, setShowPicker] = useState(false);
   const [manual, setManual] = useState(0);
 
@@ -132,7 +137,7 @@ function PositionPicker({
       <div className="flex items-center gap-2 flex-wrap">
         {positions.length === 0 && (
           <span className="text-xs text-base-content/50">
-            未選択（無効）
+            {t("tm.pos.none")}
           </span>
         )}
         {positions.map((p, i) => (
@@ -140,7 +145,7 @@ function PositionPicker({
             {p}
             <button
               type="button"
-              aria-label={`位置 ${p} を削除`}
+              aria-label={t("tm.aria.removePos", { n: p })}
               onClick={() => removePos(i)}
             >
               ×
@@ -153,7 +158,7 @@ function PositionPicker({
             className="btn btn-xs btn-outline gap-1"
             onClick={() => setShowPicker((v) => !v)}
           >
-            {showPicker ? "レイアウトを閉じる" : "レイアウトで選ぶ"}
+            {showPicker ? t("tm.pos.hideLayout") : t("tm.pos.pickLayout")}
           </button>
         )}
         <span className="flex items-center gap-1">
@@ -163,7 +168,7 @@ function PositionPicker({
             className="input input-bordered input-xs w-16"
             value={manual}
             onChange={(e) => setManual(Math.max(0, Number(e.target.value) | 0))}
-            aria-label={`${idPrefix} 番号で位置を追加`}
+            aria-label={t("tm.aria.addPosByNumber", { id: idPrefix })}
           />
           <button
             type="button"
@@ -171,7 +176,7 @@ function PositionPicker({
             onClick={addManual}
             disabled={positions.length >= TMG_HT_POS_SLOTS}
           >
-            番号で追加
+            {t("tm.pos.addByNumber")}
           </button>
         </span>
       </div>
@@ -201,17 +206,19 @@ function HtNodeCard({
   layoutPositions: KeyPosition[] | null;
   onChange: (cfg: HtNodeCfg) => void;
 }) {
+  const t = useT();
   const set = (patch: Partial<HtNodeCfg>) => onChange({ ...cfg, ...patch });
   const presetId = matchHtPreset(node, cfg);
+  const nodeLabel = t(HT_NODE_LABEL_KEYS[node]);
 
   return (
     <div className="rounded-md border border-base-300 p-3 flex flex-col gap-3 self-start min-w-[26rem]">
-      <span className="font-bold">{HT_NODE_LABELS[node]}</span>
+      <span className="font-bold">{nodeLabel}</span>
 
-      <Field label="プリセット">
+      <Field label={t("tm.preset")}>
         <select
           className="select select-bordered select-sm w-72"
-          aria-label={`${HT_NODE_LABELS[node]} preset`}
+          aria-label={t("tm.aria.preset", { node: nodeLabel })}
           value={presetId ?? "custom"}
           onChange={(e) => {
             if (e.target.value === "custom") return;
@@ -220,20 +227,20 @@ function HtNodeCard({
         >
           {HT_PRESETS.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.labelJa}
+              {t(p.labelKey)}
             </option>
           ))}
-          <option value="custom">カスタム</option>
+          <option value="custom">{t("tm.preset.custom")}</option>
         </select>
       </Field>
 
       <details className="rounded border border-base-300 bg-base-200/30 p-2">
         <summary className="cursor-pointer text-sm font-semibold select-none">
-          詳細設定
+          {t("tm.advanced")}
         </summary>
         <div className="flex flex-col gap-3 mt-3">
           <SliderField
-            label="tapping-term（長押しと判定するまでの時間）"
+            label={t("tm.tappingTerm")}
             value={cfg.tappingTermMs}
             min={10}
             max={2000}
@@ -241,18 +248,18 @@ function HtNodeCard({
             onChange={(v) => set({ tappingTermMs: v })}
           />
 
-          <Field label="flavor（判定方式）">
+          <Field label={t("tm.flavor")}>
             <select
               className="select select-bordered select-sm w-72"
-              aria-label={`${HT_NODE_LABELS[node]} flavor`}
+              aria-label={t("tm.aria.flavor", { node: nodeLabel })}
               value={cfg.flavor}
               onChange={(e) =>
                 set({ flavor: Number(e.target.value) as HtFlavor })
               }
             >
-              {Object.entries(HT_FLAVOR_LABELS).map(([v, l]) => (
+              {Object.entries(HT_FLAVOR_LABEL_KEYS).map(([v, key]) => (
                 <option key={v} value={v}>
-                  {l}
+                  {t(key)}
                 </option>
               ))}
             </select>
@@ -268,10 +275,10 @@ function HtNodeCard({
                   set({ quickTapMs: e.target.checked ? 150 : -1 })
                 }
               />
-              quick-tap を有効にする
+              {t("tm.quickTap.enable")}
             </label>
             <SliderField
-              label="quick-tap-ms（直前のタップから連打とみなす時間）"
+              label={t("tm.quickTapMs")}
               value={cfg.quickTapMs >= 0 ? cfg.quickTapMs : 0}
               min={0}
               max={2000}
@@ -291,10 +298,10 @@ function HtNodeCard({
                   set({ requirePriorIdleMs: e.target.checked ? 150 : -1 })
                 }
               />
-              require-prior-idle を有効にする
+              {t("tm.priorIdle.enable")}
             </label>
             <SliderField
-              label="require-prior-idle-ms（直前に何も押していない状態が必要な時間）"
+              label={t("tm.priorIdleMs")}
               value={cfg.requirePriorIdleMs >= 0 ? cfg.requirePriorIdleMs : 0}
               min={0}
               max={2000}
@@ -306,7 +313,7 @@ function HtNodeCard({
 
           <div className="flex flex-col gap-2 border-t border-base-300 pt-2">
             <span className="text-xs font-semibold text-base-content/70">
-              positional（位置による判定調整）
+              {t("tm.positional")}
             </span>
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -315,7 +322,7 @@ function HtNodeCard({
                 checked={cfg.retroTap}
                 onChange={(e) => set({ retroTap: e.target.checked })}
               />
-              retro-tap（ホールドと判定された後に単独で離した場合、タップとして送る）
+              {t("tm.retroTap")}
             </label>
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -326,7 +333,7 @@ function HtNodeCard({
                   set({ holdTriggerOnRelease: e.target.checked })
                 }
               />
-              hold-trigger-on-release（他のキーが離されるまでホールド判定を待つ）
+              {t("tm.holdTriggerOnRelease")}
             </label>
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -337,13 +344,13 @@ function HtNodeCard({
                   set({ holdWhileUndecided: e.target.checked })
                 }
               />
-              hold-while-undecided（判定中は他のキー送信を保留する）
+              {t("tm.holdWhileUndecided")}
             </label>
 
             <div className="flex flex-col gap-1">
-              <span className="text-sm">hold-trigger-key-positions（対象キー位置）</span>
+              <span className="text-sm">{t("tm.positions")}</span>
               <span className="text-xs text-base-content/60">
-                ここに挙げたキー位置と同時に押されたときだけホールドを優先します（未選択なら無効）。
+                {t("tm.positions.hint")}
               </span>
               <PositionPicker
                 idPrefix={`ht-${node}`}
@@ -364,17 +371,21 @@ function HtNodeCard({
  *   than read again here — MainPanels has already asked, and a second capability
  *   read would take its turn ahead of the panel's own. Undefined/null means we
  *   couldn't ask, which for the debounce note reads as "no split propagation":
- *   firmware that can't introduce itself predates the feature.
+ *   firmware that can't introduce itself predates the feature. For the write
+ *   guard it reads as "allowed" instead — see canWriteFeature.
  */
 export function TimingPanel({ caps }: { caps?: ToraboCaps | null }) {
   const t = useT();
   const { conn } = useContext(ConnectionContext);
   const [cfg, setCfg] = useState<TimingConfig | null>(null);
-  const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const { status, read, write } = usePanelStatus({ onReadFailed: () => setCfg(null) });
   // Physical layout for the hold-trigger-key-positions picker — same source as
   // the combo editor's picker (fetched over the Studio RPC, on demand only).
   const [positions, setPositions] = useState<KeyPosition[] | null>(null);
   const splitDebounce = hasSplitDebounce(caps ?? null);
+  // The firmware's wire is newer than encodeTiming can produce: read, but never
+  // write back a config with the fields we couldn't decode stripped out.
+  const writeBlocked = !canWriteFeature(caps ?? null, Feature.Timing);
 
   useEffect(() => {
     if (!conn) setPositions(null);
@@ -393,28 +404,19 @@ export function TimingPanel({ caps }: { caps?: ToraboCaps | null }) {
     );
   }, [conn]);
 
-  const onRead = useCallback(async () => {
-    setStatus({ kind: "busy", msg: t("status.reading") });
-    try {
-      await loadLayout();
-      setCfg(decodeTiming(await timingReadConfig()));
-      setStatus({ kind: "ok", msg: t("status.loaded") });
-    } catch (e) {
-      setCfg(null);
-      setStatus({ kind: "error", msg: t("status.error") + String(e) });
-    }
-  }, [loadLayout, t]);
+  const onRead = useCallback(
+    () =>
+      read(async () => {
+        await loadLayout();
+        setCfg(decodeTiming(await timingReadConfig()));
+      }),
+    [loadLayout, read]
+  );
 
-  const onWrite = useCallback(async () => {
+  const onWrite = useCallback(() => {
     if (!cfg) return;
-    setStatus({ kind: "busy", msg: t("status.saving") });
-    try {
-      await timingWriteConfig(encodeTiming(cfg));
-      setStatus({ kind: "ok", msg: t("status.applied") });
-    } catch (e) {
-      setStatus({ kind: "error", msg: t("status.error") + String(e) });
-    }
-  }, [cfg, t]);
+    return write(async () => timingWriteConfig(encodeTiming(cfg)));
+  }, [cfg, write]);
 
   if (!conn) {
     return (
@@ -427,18 +429,15 @@ export function TimingPanel({ caps }: { caps?: ToraboCaps | null }) {
   return (
     <div className="p-4 overflow-auto flex flex-col gap-4 h-full">
       <div className="flex flex-col gap-1">
-        <h2 className="text-fluid-xl font-bold">
-          タップ反応設定
-        </h2>
-        <p className="text-sm text-base-content/70">
-          Hold-Tap（mt / lt）の判定時間とキーボードのデバウンス時間を、再ビルドなしで調整します。
-        </p>
+        <h2 className="text-fluid-xl font-bold">{t("tm.title")}</h2>
+        <p className="text-sm text-base-content/70">{t("tm.subtitle")}</p>
       </div>
 
       <PanelActionBar
         onRead={onRead}
         onWrite={onWrite}
         writeDisabled={!cfg || status.kind === "busy"}
+        writeBlocked={writeBlocked}
         status={status}
       />
 
@@ -448,10 +447,7 @@ export function TimingPanel({ caps }: { caps?: ToraboCaps | null }) {
         <>
           <section className="flex flex-col gap-2">
             <h3 className="text-base font-bold">Hold-Tap</h3>
-            <p className="text-sm text-base-content/70">
-              mt（&amp;mt / mod_tap）と lt（&amp;lt / layer_tap）はノード単位の設定です。
-              キーマップでそれぞれを使っている全てのキーに一括で反映されます（キーごとの個別設定はできません）。
-            </p>
+            <p className="text-sm text-base-content/70">{t("tm.ht.desc")}</p>
             <div className="flex flex-wrap gap-4">
               {cfg.htNodes.map((node, i) => (
                 <HtNodeCard
@@ -468,20 +464,20 @@ export function TimingPanel({ caps }: { caps?: ToraboCaps | null }) {
           </section>
 
           <section className="flex flex-col gap-2 rounded-md border border-base-300 bg-base-200/40 p-4 self-stretch">
-            <h3 className="text-base font-bold">デバウンス</h3>
+            <h3 className="text-base font-bold">{t("tm.debounce.title")}</h3>
             <p className="text-sm text-base-content/70">
-              キーのチャタリング防止時間です。数字が大きいほど誤入力は減りますが、反応がわずかに遅くなります。
+              {t("tm.debounce.desc")}
             </p>
             <div className="flex flex-wrap gap-6">
               <SliderField
-                label="press（押下時）"
+                label={t("tm.debounce.press")}
                 value={cfg.debouncePressMs}
                 min={1}
                 max={100}
                 onChange={(v) => setCfg((c) => (c ? { ...c, debouncePressMs: v } : c))}
               />
               <SliderField
-                label="release（離した時）"
+                label={t("tm.debounce.release")}
                 value={cfg.debounceReleaseMs}
                 min={1}
                 max={100}
@@ -506,7 +502,7 @@ export function TimingPanel({ caps }: { caps?: ToraboCaps | null }) {
           </section>
 
           <div className="rounded-md border border-info/40 bg-info/10 px-4 py-3 text-sm leading-relaxed text-base-content/80 self-start max-w-3xl">
-            書き込みは即反映され、本体に保存されます。Hold-Tap は次の押下から新しい設定で判定されます。
+            {t("tm.writeNote")}
           </div>
         </>
       )}

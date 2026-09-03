@@ -4,8 +4,10 @@
 // (`en`) value. Japanese is the default language for this torabo-tsuki focused
 // fork; English is available via the header language toggle.
 //
-// NOTE: the Trackball and Backup panels are authored Japanese-first and are not
-// routed through this dictionary.
+// Panel-specific copy lives in ./panels/*.ts, one file per settings panel, and
+// is merged in below. This file keeps what is shared across the whole app.
+
+import { panelEn, panelJa } from "./panels";
 
 export type Lang = "ja" | "en";
 
@@ -21,6 +23,9 @@ const ja: Dict = {
   "common.cancel": "キャンセル",
   "common.save": "保存",
   "common.close": "閉じる",
+  // A bold label followed by its explanation. Japanese needs no space around
+  // the full-width colon; English needs one after it.
+  "common.labelSep": "：",
   "common.continue": "続けますか？",
 
   // Header
@@ -32,7 +37,20 @@ const ja: Dict = {
   "tooltip.redo": "やり直す",
   "tooltip.save": "保存",
   "tooltip.discard": "変更を破棄",
+  "connect.failed": "選んだ機器に接続できませんでした。",
+  "connect.failedUsb":
+    "USB でキーボードが応答しません。\n\n" +
+    "よくある原因: キーボードの出力先が Bluetooth になっています。ZMK は" +
+    "「そのとき選択されている出力先」でしか Studio の通信に応答しないため、" +
+    "USB ケーブルが繋がっていても、出力先が Bluetooth なら USB では応答しません。\n\n" +
+    "対処:\n" +
+    "・PC の Bluetooth を切る（USB が唯一の出力先になり、そのまま繋がります）\n" +
+    "・またはキーマップに割り当てた &out（Output Selection）キーで USB に切り替える\n\n" +
+    "この設定はキーボード側に保存され、キーマップを変えても残ります。",
   "lang.label": "言語",
+  "keylayout.label": "表示用のキー配列",
+  "keylayout.desc":
+    "キーキャップに描く記号を、OS のキーボードレイアウトに合わせます。キーボードが送るキーコードは変わりません。",
 
   // Tabs
   "tab.listLabel": "パネル切り替え",
@@ -46,6 +64,7 @@ const ja: Dict = {
   "tab.macros": "マクロ",
   "tab.combos": "コンボ",
   "tab.backup": "バックアップ",
+  "tab.fwinfo": "FW情報",
   "tabgroup.edit": "編集",
   "tabgroup.manage": "管理",
 
@@ -66,7 +85,6 @@ const ja: Dict = {
   "connect.intro":
     "キーボードを USB または Bluetooth でつなぎます。下から接続方法を選んでください。",
   "connect.selectDevice": "デバイスを選択:",
-  "connect.selectType": "接続方法を選択してください。",
   "connect.unsupportedPre":
     "お使いのブラウザは対応していません。Torabo Studio は ",
   "connect.unsupportedMid": " または ",
@@ -132,6 +150,10 @@ const ja: Dict = {
   "actionBar.readPlain": "読み込む",
   "actionBar.write": "③ 書き込む",
   "actionBar.writeSub": "Apply + Save",
+  "actionBar.writeBlocked":
+    "キーボードのファームウェアがこのアプリより新しいため、" +
+    "設定が壊れるのを防ぐために書き込みを無効にしています。" +
+    "読み込み（確認）はできます。アプリを更新してください。",
 
   // Collapsible help blocks
   "help.termsSummary": "❓ 用語の説明",
@@ -162,6 +184,8 @@ const ja: Dict = {
     "この画面では、Hold-Tap（mt / lt）の判定時間とキーボードのデバウンス時間を編集します。",
   "preconnect.backup":
     "この画面では、キーボードの設定をファイルに保存したり、ファイルから元に戻したりします。",
+  "preconnect.fwinfo":
+    "この画面では、つないだキーボードの ext_FW（torabo 拡張ファームウェア）のバージョンと、入っている機能の一覧を確認できます。",
 
   // Timing — どちらの注記を出すかは caps の TimingCap.SplitDebounce で決まる。
   // 左右どちらが central かに関係なく正しい文言になるよう、半身の呼び名は使わない。
@@ -208,6 +232,7 @@ const en: Dict = {
   "common.cancel": "Cancel",
   "common.save": "Save",
   "common.close": "Close",
+  "common.labelSep": ": ",
   "common.continue": "Continue?",
 
   "header.disconnect": "Disconnect",
@@ -218,7 +243,20 @@ const en: Dict = {
   "tooltip.redo": "Redo",
   "tooltip.save": "Save",
   "tooltip.discard": "Discard",
+  "connect.failed": "Failed to connect to the chosen device.",
+  "connect.failedUsb":
+    "The keyboard is not answering over USB.\n\n" +
+    "Most likely cause: its output is set to Bluetooth. ZMK only answers Studio " +
+    "on the output endpoint that is currently selected, so with the output on " +
+    "Bluetooth it will not answer over USB even with the cable plugged in.\n\n" +
+    "What to do:\n" +
+    "- Turn off Bluetooth on this PC (USB then becomes the only endpoint)\n" +
+    "- Or switch the output to USB with an &out (Output Selection) key\n\n" +
+    "This setting is stored on the keyboard and survives keymap changes.",
   "lang.label": "Language",
+  "keylayout.label": "Legend layout",
+  "keylayout.desc":
+    "Draws keycap glyphs to match your OS keyboard layout. The keycodes the keyboard sends are unchanged.",
 
   "tab.listLabel": "Main navigation tabs",
   "tab.keymap": "Keymap",
@@ -231,6 +269,7 @@ const en: Dict = {
   "tab.macros": "Macros",
   "tab.combos": "Combos",
   "tab.backup": "Backup",
+  "tab.fwinfo": "Firmware",
   "tabgroup.edit": "Edit",
   "tabgroup.manage": "Manage",
 
@@ -248,7 +287,6 @@ const en: Dict = {
   "connect.intro":
     "Connect your keyboard over USB or Bluetooth. Choose a connection type below.",
   "connect.selectDevice": "Select A Device:",
-  "connect.selectType": "Select a connection type.",
   "connect.unsupportedPre":
     "Your browser is not supported. Torabo Studio uses either ",
   "connect.unsupportedMid": " or ",
@@ -309,6 +347,9 @@ const en: Dict = {
   "actionBar.readPlain": "Read",
   "actionBar.write": "③ Write",
   "actionBar.writeSub": "Apply + Save",
+  "actionBar.writeBlocked":
+    "This keyboard's firmware is newer than this app, so writing is disabled " +
+    "to avoid damaging its settings. Reading still works. Please update the app.",
 
   "help.termsSummary": "❓ Glossary",
   "help.notesSummary": "❓ Notes",
@@ -336,6 +377,8 @@ const en: Dict = {
     "This screen edits Hold-Tap (mt / lt) timing and the keyboard's debounce time.",
   "preconnect.backup":
     "This screen saves your keyboard settings to a file and restores them from one.",
+  "preconnect.fwinfo":
+    "This screen shows the connected keyboard's ext_FW version (the torabo firmware extensions) and the list of features it was built with.",
 
   "timing.debounce.bothHalves":
     "Applies to both halves — the central sends the setting to the other half on every connect.",
@@ -371,4 +414,7 @@ const en: Dict = {
   "empty.combos": 'Press the blue "Read" button to load your saved combos.',
 };
 
-export const messages: Record<Lang, Dict> = { ja, en };
+export const messages: Record<Lang, Dict> = {
+  ja: { ...panelJa, ...ja },
+  en: { ...panelEn, ...en },
+};

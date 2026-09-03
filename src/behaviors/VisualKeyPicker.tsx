@@ -1,7 +1,7 @@
 import { useMemo } from "react";
-import { useLocalStorageState } from "../misc/useLocalStorageState";
 import { hid_usage_from_page_and_id } from "../hid-usages";
 import { useT } from "../i18n";
+import { useKeyLayout } from "../keyboard/KeyLayoutContext";
 import { JIS_LAYOUT, KeyDef, KeyLayout, US_LAYOUT } from "./keyLayouts";
 
 export interface VisualKeyPickerProps {
@@ -22,18 +22,19 @@ const KEYBOARD_PAGE = 0x07;
 
 /**
  * A clickable QWERTY keyboard for assigning a key without hunting through the
- * dropdown. Switchable between US and JIS legends. Clicking a key sets the base
- * usage while preserving any implicit modifiers already on the binding.
+ * dropdown. Clicking a key sets the base usage while preserving any implicit
+ * modifiers already on the binding.
+ *
+ * The US/JIS switch here is the app-wide legend setting (the same one in the
+ * header), so the picker and the board can no longer disagree about which
+ * layout the user is on.
  */
 export const VisualKeyPicker = ({
   value,
   onValueChanged,
 }: VisualKeyPickerProps) => {
   const t = useT();
-  const [layoutId, setLayoutId] = useLocalStorageState<LayoutId>(
-    "visualKeyLayout",
-    "us"
-  );
+  const { keyLayout: layoutId, setKeyLayout: setLayoutId } = useKeyLayout();
 
   // The currently selected usage id, if it lives on the keyboard page.
   const selectedUsageId = useMemo(() => {

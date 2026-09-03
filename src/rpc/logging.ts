@@ -3,6 +3,7 @@ import {
   RequestResponse,
   RpcConnection,
 } from "@zmkfirmware/zmk-studio-ts-client";
+import { tr } from "../i18n";
 import { onRpcActivity } from "./activity";
 
 // How long to wait for a single RPC response before giving up on it. Heavy HID
@@ -77,12 +78,15 @@ function withIdleTimeout<T>(
       idleTimer = setTimeout(
         () =>
           fail(
-            `${label}: 応答が ${idleMs}ms 途絶えました` +
-              `（この呼び出し中の受信: ${chunks} チャンク / ${bytes} バイト` +
-              (chunks
-                ? `、最後の受信は ${Date.now() - lastAt}ms 前`
-                : "、まったく届いていません") +
-              "）"
+            tr("sys.rpc.idleTimeout", {
+              label,
+              ms: idleMs,
+              chunks,
+              bytes,
+              detail: chunks
+                ? tr("sys.rpc.idleTimeout.last", { ago: Date.now() - lastAt })
+                : tr("sys.rpc.idleTimeout.none"),
+            })
           ),
         idleMs
       );
@@ -99,7 +103,7 @@ function withIdleTimeout<T>(
 
     const unlisten = onRpcActivity(rearm);
     const hardTimer = setTimeout(
-      () => fail(`${label}: ${maxMs}ms を超えても完了しませんでした`),
+      () => fail(tr("sys.rpc.maxTimeout", { label, ms: maxMs })),
       maxMs
     );
 

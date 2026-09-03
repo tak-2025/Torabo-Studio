@@ -29,6 +29,8 @@
  * WRITE). WRITE replaces the whole 96B blob — always Read before Save.
  */
 
+import { tr } from "../i18n";
+
 export const TMG_WIRE_LEN = 96;
 export const TMG_VERSION = 1;
 export const TMG_HT_NODE_COUNT = 2;
@@ -68,11 +70,13 @@ export const HtFlavor = {
 export type HtFlavor = (typeof HtFlavor)[keyof typeof HtFlavor];
 export const HT_FLAVOR_MAX = HtFlavor.TapUnlessInterrupted;
 
-export const HT_FLAVOR_LABELS: Record<HtFlavor, string> = {
-  [HtFlavor.HoldPreferred]: "ホールド優先（hold-preferred）",
-  [HtFlavor.Balanced]: "バランス（balanced）",
-  [HtFlavor.TapPreferred]: "タップ優先（tap-preferred）",
-  [HtFlavor.TapUnlessInterrupted]: "妨害されなければタップ（tap-unless-interrupted）",
+/** Message keys, not text — the panel resolves them with `t()` so the labels
+ * follow the language toggle. See src/i18n/panels/timing.ts. */
+export const HT_FLAVOR_LABEL_KEYS: Record<HtFlavor, string> = {
+  [HtFlavor.HoldPreferred]: "tm.flavor.holdPreferred",
+  [HtFlavor.Balanced]: "tm.flavor.balanced",
+  [HtFlavor.TapPreferred]: "tm.flavor.tapPreferred",
+  [HtFlavor.TapUnlessInterrupted]: "tm.flavor.tapUnlessInterrupted",
 };
 
 /**
@@ -83,9 +87,10 @@ export const HT_FLAVOR_LABELS: Record<HtFlavor, string> = {
 export const HtNode = { ModTap: 0, LayerTap: 1 } as const;
 export type HtNode = (typeof HtNode)[keyof typeof HtNode];
 
-export const HT_NODE_LABELS: Record<HtNode, string> = {
-  [HtNode.ModTap]: "mt（Mod-Tap）",
-  [HtNode.LayerTap]: "lt（Layer-Tap）",
+/** Message keys, not text — resolved with `t()` by the panel. */
+export const HT_NODE_LABEL_KEYS: Record<HtNode, string> = {
+  [HtNode.ModTap]: "tm.node.mt",
+  [HtNode.LayerTap]: "tm.node.lt",
 };
 
 export interface HtNodeCfg {
@@ -132,13 +137,13 @@ export function emptyHtNode(): HtNodeCfg {
 export function decodeTiming(buf: Uint8Array): TimingConfig {
   if (buf.length !== TMG_WIRE_LEN) {
     throw new Error(
-      `timing config: expected ${TMG_WIRE_LEN} bytes, got ${buf.length}`,
+      tr("tm.err.size", { expected: TMG_WIRE_LEN, got: buf.length }),
     );
   }
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const version = dv.getUint8(W_VERSION);
   if (version !== TMG_VERSION) {
-    throw new Error(`timing config: unsupported version ${version}`);
+    throw new Error(tr("tm.err.version", { version }));
   }
   const nodeCount = dv.getUint8(W_HT_NODE_COUNT);
   const posSlots = Math.min(dv.getUint8(W_HT_POS_SLOTS) || TMG_HT_POS_SLOTS, TMG_HT_POS_SLOTS);
@@ -252,8 +257,8 @@ type PresetFields = Pick<
 
 export interface HtPreset {
   id: string;
-  labelJa: string;
-  labelEn: string;
+  /** Message key (src/i18n/panels/timing.ts), resolved with `t()` at render. */
+  labelKey: string;
   mt: PresetFields;
   lt: PresetFields;
 }
@@ -261,8 +266,7 @@ export interface HtPreset {
 export const HT_PRESETS: HtPreset[] = [
   {
     id: "standard",
-    labelJa: "標準",
-    labelEn: "Standard",
+    labelKey: "tm.preset.standard",
     mt: {
       tappingTermMs: 200,
       flavor: HtFlavor.HoldPreferred,
@@ -282,8 +286,7 @@ export const HT_PRESETS: HtPreset[] = [
   },
   {
     id: "roll-safe",
-    labelJa: "ロール誤爆防止",
-    labelEn: "Roll-safe",
+    labelKey: "tm.preset.rollSafe",
     mt: {
       tappingTermMs: 200,
       flavor: HtFlavor.TapPreferred,
@@ -303,8 +306,7 @@ export const HT_PRESETS: HtPreset[] = [
   },
   {
     id: "home-row-mods",
-    labelJa: "ホームロウモッド",
-    labelEn: "Home row mods",
+    labelKey: "tm.preset.homeRowMods",
     mt: {
       tappingTermMs: 280,
       flavor: HtFlavor.Balanced,

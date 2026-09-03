@@ -30,6 +30,8 @@ fn main() {
         .manage(ActiveConnection {
             conn: Mutex::new(None),
             device: Mutex::new(None),
+            generation: std::sync::atomic::AtomicU64::new(0),
+            tasks: Mutex::new(Vec::new()),
         })
         .invoke_handler(tauri::generate_handler![
             transport_send_data,

@@ -12,10 +12,11 @@ import { useModalRef } from "./misc/useModalRef";
 import { LockStateContext } from "./rpc/LockStateContext";
 import { LockState } from "@zmkfirmware/zmk-studio-ts-client/core";
 import { ConnectionContext } from "./rpc/ConnectionContext";
-import { ChevronDown, Undo2, Redo2, Save, Trash2, Languages } from "lucide-react";
+import { ChevronDown, Undo2, Redo2, Save, Trash2, Languages, Keyboard } from "lucide-react";
 import { Tooltip } from "./misc/Tooltip";
 import { GenericModal } from "./GenericModal";
 import { useI18n, LANGS } from "./i18n";
+import { KEY_LAYOUTS, useKeyLayout } from "./keyboard/KeyLayoutContext";
 
 export interface AppHeaderProps {
   connectedDeviceLabel?: string;
@@ -43,6 +44,7 @@ export const AppHeader = ({
   const [showSettingsReset, setShowSettingsReset] = useState(false);
 
   const { lang, setLang, t } = useI18n();
+  const { keyLayout, setKeyLayout } = useKeyLayout();
   const lockState = useContext(LockStateContext);
   const connectionState = useContext(ConnectionContext);
 
@@ -122,6 +124,27 @@ export const AppHeader = ({
         </Popover>
       </MenuTrigger>
       <div className="flex justify-end items-center gap-1 px-2">
+        <Tooltip label={`${t("keylayout.label")} — ${t("keylayout.desc")}`}>
+          <Button
+            className="flex items-center justify-center gap-1 p-1.5 rounded enabled:hover:bg-base-300"
+            onPress={() =>
+              setKeyLayout(
+                KEY_LAYOUTS[
+                  (KEY_LAYOUTS.findIndex((l) => l.id === keyLayout) + 1) %
+                    KEY_LAYOUTS.length
+                ].id
+              )
+            }
+          >
+            <Keyboard
+              className="inline-block w-4"
+              aria-label={t("keylayout.label")}
+            />
+            <span className="text-xs font-semibold whitespace-nowrap">
+              {KEY_LAYOUTS.find((l) => l.id === keyLayout)?.label}
+            </span>
+          </Button>
+        </Tooltip>
         <Tooltip label={t("lang.label")}>
           <Button
             className="flex items-center justify-center gap-1 p-1.5 rounded enabled:hover:bg-base-300"

@@ -13,6 +13,8 @@
  * order in this array IS the priority. Put warnings above steady states.
  */
 
+import { tr } from "../i18n";
+
 export const LED_MAGIC = 0x656c; // "le"
 export const LED_VERSION = 1;
 export const LED_HDR = 6;
@@ -34,14 +36,14 @@ export const CH_MASK = 0x07;
  * index" — a fixed colour there would make every profile look the same. */
 export const COLOUR_AUTO = 0;
 
-export const COLOURS: { mask: number; label: string }[] = [
-  { mask: Ch.Red, label: "赤" },
-  { mask: Ch.YellowGreen, label: "黄緑" },
-  { mask: Ch.Green, label: "緑" },
-  { mask: Ch.Red | Ch.Green, label: "赤+緑" },
-  { mask: Ch.Red | Ch.YellowGreen, label: "赤+黄緑" },
-  { mask: Ch.Green | Ch.YellowGreen, label: "緑+黄緑" },
-  { mask: Ch.Red | Ch.YellowGreen | Ch.Green, label: "全点灯" },
+export const COLOURS: { mask: number; labelKey: string }[] = [
+  { mask: Ch.Red, labelKey: "led.colour.red" },
+  { mask: Ch.YellowGreen, labelKey: "led.colour.yellowGreen" },
+  { mask: Ch.Green, labelKey: "led.colour.green" },
+  { mask: Ch.Red | Ch.Green, labelKey: "led.colour.redGreen" },
+  { mask: Ch.Red | Ch.YellowGreen, labelKey: "led.colour.redYellowGreen" },
+  { mask: Ch.Green | Ch.YellowGreen, labelKey: "led.colour.greenYellowGreen" },
+  { mask: Ch.Red | Ch.YellowGreen | Ch.Green, labelKey: "led.colour.all" },
 ];
 
 /* Duty cycle is the only lever on battery drain, so the pattern is also the power
@@ -56,13 +58,37 @@ export const Pattern = {
 } as const;
 export type Pattern = (typeof Pattern)[keyof typeof Pattern];
 
-export const PATTERNS: { id: Pattern; label: string; note: string }[] = [
-  { id: Pattern.Solid, label: "点灯", note: "条件が続く間ずっと。最も電池を食う" },
-  { id: Pattern.BlinkSlow, label: "ゆっくり点滅", note: "2秒に1回。点灯の約1/40" },
-  { id: Pattern.BlinkFast, label: "速い点滅", note: "0.5秒に1回" },
-  { id: Pattern.Double, label: "ダブル点滅", note: "2回光って長い休み。警告向き" },
-  { id: Pattern.Flash, label: "1秒光る", note: "変化したときに1回だけ" },
-  { id: Pattern.FlashLong, label: "1.5秒光る", note: "変化したときに1回だけ" },
+export const PATTERNS: { id: Pattern; labelKey: string; noteKey: string }[] = [
+  {
+    id: Pattern.Solid,
+    labelKey: "led.pattern.solid",
+    noteKey: "led.pattern.solidNote",
+  },
+  {
+    id: Pattern.BlinkSlow,
+    labelKey: "led.pattern.blinkSlow",
+    noteKey: "led.pattern.blinkSlowNote",
+  },
+  {
+    id: Pattern.BlinkFast,
+    labelKey: "led.pattern.blinkFast",
+    noteKey: "led.pattern.blinkFastNote",
+  },
+  {
+    id: Pattern.Double,
+    labelKey: "led.pattern.double",
+    noteKey: "led.pattern.doubleNote",
+  },
+  {
+    id: Pattern.Flash,
+    labelKey: "led.pattern.flash",
+    noteKey: "led.pattern.flashNote",
+  },
+  {
+    id: Pattern.FlashLong,
+    labelKey: "led.pattern.flashLong",
+    noteKey: "led.pattern.flashLongNote",
+  },
 ];
 
 export const UseCase = {
@@ -77,72 +103,79 @@ export const UseCase = {
 } as const;
 export type UseCase = (typeof UseCase)[keyof typeof UseCase];
 
+/** Which optgroup a use case sits under. Language-independent on purpose: the
+ * visible heading comes from `led.group.*` at render time. */
+export type UseCaseGroup = "warning" | "change" | "state";
+
+/** In display order — the panel renders one optgroup per entry. */
+export const USECASE_GROUPS: UseCaseGroup[] = ["warning", "change", "state"];
+
 /** `oneShot` use cases fire on a change and then go dark; the others are states
  * that hold. `indexed` ones pick their colour from the profile/layer number, so the
- * colour picker is replaced by "自動". */
+ * colour picker is replaced by "led.colour.auto". */
 export const USECASES: {
   id: UseCase;
-  label: string;
-  group: "警告" | "変化の通知" | "状態表示";
+  labelKey: string;
+  group: UseCaseGroup;
   oneShot: boolean;
   indexed: boolean;
-  note: string;
+  noteKey: string;
 }[] = [
   {
     id: UseCase.LinkLost,
-    label: "相方を見失った",
-    group: "警告",
+    labelKey: "led.uc.linkLost",
+    group: "warning",
     oneShot: false,
     indexed: false,
-    note: "左右のリンクが切れたとき。どちらの半分が落ちたか、その半分自身で分かる",
+    noteKey: "led.uc.linkLostNote",
   },
   {
     id: UseCase.BatteryLow,
-    label: "電池残量が少ない",
-    group: "警告",
+    labelKey: "led.uc.batteryLow",
+    group: "warning",
     oneShot: false,
     indexed: false,
-    note: "しきい値(%)を下回ったとき。左右それぞれ自分の電池を見る",
+    noteKey: "led.uc.batteryLowNote",
   },
   {
     id: UseCase.ProfileChanged,
-    label: "BLEプロファイル切替",
-    group: "変化の通知",
+    labelKey: "led.uc.profileChanged",
+    group: "change",
     oneShot: true,
     indexed: true,
-    note: "プロファイル番号ごとに色が変わる",
+    noteKey: "led.uc.profileChangedNote",
   },
   {
     id: UseCase.LayerChanged,
-    label: "レイヤー変更",
-    group: "変化の通知",
+    labelKey: "led.uc.layerChanged",
+    group: "change",
     oneShot: true,
     indexed: true,
-    note: "レイヤー番号ごとに色が変わる",
+    noteKey: "led.uc.layerChangedNote",
   },
   {
     id: UseCase.EndpointChanged,
-    label: "出力先切替 (USB↔BLE)",
-    group: "変化の通知",
+    labelKey: "led.uc.endpointChanged",
+    group: "change",
     oneShot: true,
     indexed: false,
-    note: "",
+    noteKey: "",
   },
   {
     id: UseCase.CapsLock,
-    label: "Caps Lock",
-    group: "状態表示",
+    labelKey: "led.uc.capsLock",
+    group: "state",
     oneShot: false,
     indexed: false,
-    note: "ONの間ずっと。点滅にすると電池が持つ",
+    noteKey: "led.uc.capsLockNote",
   },
   {
     id: UseCase.Modifier,
-    label: "修飾キー押下中",
-    group: "状態表示",
+    labelKey: "led.uc.modifier",
+    group: "state",
     oneShot: false,
     indexed: false,
-    note: "押している間だけ。一過性なので電池には優しい",
+    noteKey: "led.uc.modifierNote",
   },
 ];
 
@@ -187,19 +220,19 @@ export function ledWireLen(): number {
 export function decodeLed(buf: Uint8Array): LedConfig {
   const need = ledWireLen();
   if (buf.length < LED_HDR) {
-    throw new Error(`LED config too short (${buf.length} B)`);
+    throw new Error(tr("led.err.short", { n: buf.length }));
   }
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const magic = dv.getUint16(0, true);
   if (magic !== LED_MAGIC) {
-    throw new Error(`LED config: bad magic 0x${magic.toString(16)}`);
+    throw new Error(tr("led.err.magic", { magic: magic.toString(16) }));
   }
   const version = dv.getUint8(2);
   if (version !== LED_VERSION) {
-    throw new Error(`LED config: unsupported version ${version}`);
+    throw new Error(tr("led.err.version", { version }));
   }
   if (buf.length < need) {
-    throw new Error(`LED config truncated: ${buf.length} B, need ${need}`);
+    throw new Error(tr("led.err.truncated", { got: buf.length, need }));
   }
 
   const caps = dv.getUint8(3);

@@ -1,3 +1,4 @@
+import { tr } from "../../i18n";
 import type { ToraboConfigBackend } from "../types";
 import { CONFIG_SERVICES, type ConfigKey, type ConfigService } from "./uuids";
 
@@ -79,8 +80,7 @@ export function makeConfigBackend(
     // is still a live JS object, so returning it straight away sent the
     // actual read/write at a dead GATT server and surfaced as a raw
     // DOMException instead of this message.
-    if (!server.connected)
-      throw new Error("キーボードとの接続が切れています。");
+    if (!server.connected) throw new Error(tr("sys.cfg.disconnected"));
 
     const cached = handles.get(key);
     if (cached) return cached;
@@ -93,8 +93,10 @@ export function makeConfigBackend(
       // Absent service is the normal answer for firmware built without the
       // feature, so say which feature rather than leaking a bare GATT error.
       throw new Error(
-        `${spec.label} サービスがこのキーボードにありません` +
-          `（その機能を含まないファームウェアの可能性があります）: ${errText(e)}`,
+        tr("sys.cfg.serviceMissing", {
+          label: spec.label,
+          error: errText(e),
+        }),
       );
     }
     handles.set(key, chr);
@@ -121,12 +123,16 @@ export function makeConfigBackend(
     // its own and does not need a second opinion here.
     if (spec.exactLength !== null && bytes.length !== spec.exactLength) {
       throw new Error(
-        `${spec.label} の読み取りが ${bytes.length} バイトでした` +
-          `（${spec.exactLength} バイト必要）。` +
-          (bytes.length === 512
-            ? "ブラウザが ATT の上限 512 バイトで読み取りを打ち切った可能性があります。"
-            : "ファームウェアとアプリのバージョンが合っていない可能性があります。") +
-          "\n（不完全なデータで保存するとキーボード側の設定が失われるため、中断しました）",
+        tr("sys.cfg.readShort", {
+          label: spec.label,
+          got: bytes.length,
+          need: spec.exactLength,
+          cause: tr(
+            bytes.length === 512
+              ? "sys.cfg.readShort.att"
+              : "sys.cfg.readShort.mismatch",
+          ),
+        }),
       );
     }
     return bytes;
@@ -153,9 +159,7 @@ export function makeConfigBackend(
 
     if (!CHUNKABLE_KEYS.has(key)) {
       throw new Error(
-        `${spec.label} が ${data.length} バイトあり、512 バイトを超えています。` +
-          "このファームウェアはブラウザからの分割書き込みに対応していません" +
-          "（デスクトップ版アプリからの保存をお試しください）。",
+        tr("sys.cfg.tooLarge", { label: spec.label, bytes: data.length }),
       );
     }
 
@@ -174,8 +178,13 @@ export function makeConfigBackend(
         await chr.writeValue(chunk as unknown as BufferSource);
       } catch (e) {
         throw new Error(
-          `${spec.label} の書き込みに失敗しました` +
-            `（チャンク ${n}/${total}, ${chunk.length} バイト）: ${errText(e)}`,
+          tr("sys.cfg.writeFailed", {
+            label: spec.label,
+            n,
+            total,
+            bytes: chunk.length,
+            error: errText(e),
+          }),
         );
       }
     }

@@ -1,3 +1,4 @@
+import { tr } from "../i18n";
 import type { FileFilter, FilesBackend, ToraboBackend } from "./types";
 import { isTauri } from "./types";
 import { tauriBackend } from "./tauri";
@@ -75,11 +76,7 @@ export function unregisterBackend(backend: ToraboBackend): void {
 export function activeBackend(): ToraboBackend {
   if (registered) return registered;
   if (isTauri() && tauriGatt) return tauriBackend;
-  throw new Error(
-    "この接続では torabo 独自機能を利用できません。" +
-      "USB でも使うにはキーボードのファームウェアがトンネル対応である必要があります" +
-      "（旧ファームウェアではキーマップ編集のみ。独自設定は Bluetooth 接続でご利用ください）。",
-  );
+  throw new Error(tr("sys.backend.noToraboAccess"));
 }
 
 /* --- Is the desktop build's GATT path usable? --------------------------------

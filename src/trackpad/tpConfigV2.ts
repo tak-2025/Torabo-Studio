@@ -154,23 +154,35 @@ export function encodeMeta(m: TpDeviceMeta): number {
   return ((m.side & 0x03) | ((m.conn & 0x03) << 2) | ((m.kind & 0x03) << 4)) & 0xff;
 }
 
-const SIDE_JA: Record<number, string> = { 1: "左", 2: "右" };
-const CONN_JA: Record<number, string> = { 1: "標準FFC", 2: "拡張FPC" };
-const KIND_JA: Record<number, string> = {
-  1: "トラックパッド",
-  2: "トラックボール",
-  3: "ロータリーエンコーダ",
+/* Message keys, not text: the caller owns the language. See
+ * i18n/panels/trackpad.ts for the ja/en copy. */
+const SIDE_KEYS: Record<number, string> = { 1: "tp.side.left", 2: "tp.side.right" };
+const CONN_KEYS: Record<number, string> = {
+  1: "tp.conn.standard",
+  2: "tp.conn.extension",
 };
+const KIND_KEYS: Record<number, string> = {
+  1: "tp.kind.trackpad",
+  2: "tp.kind.trackball",
+  3: "tp.kind.encoder",
+};
+
+/** The translate function shape this module needs (i18n's `useT()` / `tr`). */
+type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
 /**
  * Human label for a device, built from whatever the firmware told us. Any part
  * the firmware left unknown is simply omitted; if it told us nothing at all we
  * fall back to the wire slot so the device is still selectable.
  */
-export function describeDevice(deviceId: number, meta: number): string {
+export function describeDevice(deviceId: number, meta: number, t: Translate): string {
   const { side, conn, kind } = decodeMeta(meta);
-  const parts = [SIDE_JA[side], CONN_JA[conn], KIND_JA[kind]].filter(Boolean);
-  return parts.length ? parts.join(" · ") : `デバイス ${deviceId}`;
+  const parts = [SIDE_KEYS[side], CONN_KEYS[conn], KIND_KEYS[kind]]
+    .filter(Boolean)
+    .map((k) => t(k));
+  return parts.length
+    ? parts.join(" · ")
+    : t("tp.device.fallback", { n: deviceId });
 }
 
 /**
@@ -287,6 +299,79 @@ export function tpWireLen(
 /** Expected total wire length for a version-1 blob. */
 export function tpWireLenV1(deviceCount: number, layerCount: number): number {
   return TP_HDR + deviceCount * (TP_DEV_HDR + layerCount * TP_LAYER_V1);
+}
+
+/* ---------------------------------------------------------------------------
+ * The firmware's READ-BACK budget, and why a write can be refused for its SIZE.
+ *
+ * This wire is asymmetric, and that asymmetry is a trap the app has to steer
+ * around because fielded firmware cannot be fixed:
+ *
+ *   WRITE (config_state.c `tp_apply_wire`) accepts v1/v2/v3 and any device
+ *   count up to TP_MAX_DEVICES (4, config.h), then persists it to NVS.
+ *
+ *   READ (config_state.c `tp_encode_wire`) ignores what was written and always
+ *   re-encodes the WHOLE stored snapshot as v3: version 3, gestures present,
+ *   the 5-byte device header, and TP_MAX_LAYERS layers — not the layer count
+ *   the write carried. It returns -ENOMEM rather than truncating when that
+ *   does not fit the transport's buffer.
+ *
+ * That buffer is CONFIG_ZMK_STUDIO_TORABO_TUNNEL_BLOB_MAX_SIZE, declared in the
+ * ZMK fork at app/src/studio/Kconfig ("default 2048 if ZMK_STUDIO_TORABO_TUNNEL")
+ * and sizing the staging buffer in app/src/studio/torabo_subsystem.c.
+ * Builder-generated firmware never raises it: the override exists only as a
+ * commented-out line in
+ * torabo-tsuki_ext_FW/snippets/torabo-rpc-tunnel/torabo-rpc-tunnel.conf.
+ *
+ * So a 3- or 4-device config is accepted, saved, and from then on every read
+ * fails — permanently, because the app can only write what it has first read.
+ * At 20 layers: 2 devices = 1536 B (today's hardware, fits), 3 = 2301 B,
+ * 4 = 3066 B. Hence: predict the read-back before every write, and refuse.
+ *
+ * (Firmware comments and docs that say 3054 B are stale — that is the v2
+ * figure, from before the device header grew from 2 B to 5 B.)
+ *
+ * This constant is the FALLBACK, not the truth: it is the Kconfig default, and
+ * a build that raises the budget (torabo_tsuki_lp_right.conf already sets 3072)
+ * is indistinguishable from one that did not. A planned desc_ver 2 capability
+ * descriptor adds a header field carrying the real budget; once firmware
+ * reports it, callers should pass that value through the `budget` parameter
+ * every check below takes, and this constant stays only for firmware that
+ * reports nothing. Nothing plumbs caps here yet — the field does not exist.
+ * ------------------------------------------------------------------------- */
+export const TP_FW_BLOB_MAX = 2048;
+
+/**
+ * How many bytes the firmware's next READ of `cfg` would produce.
+ *
+ * Measured by encoding rather than by a parallel formula, so it cannot drift
+ * from the codec: force the two flags the firmware always sets on a read
+ * (gestures + coast, i.e. the v3 device header) and take the length. The blob
+ * is ~1.5 KB, so encoding it to weigh it costs nothing.
+ *
+ * One approximation, in the restore direction only: the firmware encodes ITS
+ * OWN TP_MAX_LAYERS, and a blob from another keyboard carries the layer count
+ * of the one it came from. A write is rejected outright when it exceeds the
+ * target's TP_MAX_LAYERS, so the target's is always >= the blob's and this is
+ * a lower bound there. The device count — the term that actually blows the
+ * budget — is exact either way.
+ */
+export function tpFirmwareReadbackSize(cfg: TpConfig): number {
+  return encodeTp({ ...cfg, hasGestures: true, hasCoast: true }).length;
+}
+
+/**
+ * True when writing `cfg` would leave the firmware unable to read it back.
+ *
+ * `budget` is the firmware's blob budget in bytes. It defaults to
+ * TP_FW_BLOB_MAX, which is only the Kconfig default — pass the keyboard's own
+ * value once the capability descriptor reports one (see TP_FW_BLOB_MAX).
+ */
+export function tpReadbackTooBig(
+  cfg: TpConfig,
+  budget: number = TP_FW_BLOB_MAX,
+): boolean {
+  return tpFirmwareReadbackSize(cfg) > budget;
 }
 
 export function decodeTp(bytes: Uint8Array): TpConfig {

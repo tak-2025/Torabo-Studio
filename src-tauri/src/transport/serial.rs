@@ -15,8 +15,17 @@ pub async fn serial_connect(
     id: String,
     app_handle: AppHandle,
     state: State<'_, super::commands::ActiveConnection<'_>>,
-) -> Result<bool, String> {
-    match tokio_serial::new(id, 9600).open_native_async() {
+) -> Result<u64, String> {
+    // Close the previous link BEFORE touching the port. It may be holding this
+    // very port (a reconnect after a wedged session is the common case), and
+    // opening it while it is still owned fails with "access is denied" — the
+    // error that made one bad session poison every later connection, to this
+    // keyboard and to any other. `begin` also waits for the old tasks to drop
+    // their half of the port, so the handle is genuinely released here.
+    let generation = state.begin().await;
+
+    match open_port_with_retry(&id) {
+        #[allow(unused_mut)] // `mut` is only needed on unix, below
         Ok(mut port) => {
             #[cfg(unix)]
             port.set_exclusive(false)
@@ -24,47 +33,87 @@ pub async fn serial_connect(
 
             let (mut reader, mut writer) = tokio::io::split(port);
 
+            // Every event below is addressed to this link's id, so a listener
+            // attached to an older link never sees this one's traffic.
+            let data_event = format!("connection_data:{}", generation);
+            let gone_event = format!("connection_disconnected:{}", generation);
+
             let ahc = app_handle.clone();
             let (send, mut recv) = channel(5);
             *state.conn.lock().await = Some(Box::new(send));
 
             let read_process = tauri::async_runtime::spawn(async move {
-                use tauri::Manager;
                 use tauri::Emitter;
+                use tauri::Manager;
 
                 let mut buffer = vec![0; READ_BUF_SIZE];
                 while let Ok(size) = reader.read(&mut buffer).await {
                     if size > 0 {
-                        app_handle.emit("connection_data", &buffer[..size]);
+                        let _ = app_handle.emit(&data_event, &buffer[..size]);
                     } else {
                         break;
                     }
                 }
 
+                // Only clear the slot if it is still ours; a newer link may have
+                // taken it while this reader was draining.
                 let state = app_handle.state::<super::commands::ActiveConnection>();
-                *state.conn.lock().await = None;
+                if state.is_current(generation) {
+                    *state.conn.lock().await = None;
+                }
 
-                app_handle.emit("connection_disconnected", ());
+                let _ = app_handle.emit(&gone_event, ());
             });
 
-            tauri::async_runtime::spawn(async move {
+            let write_process = tauri::async_runtime::spawn(async move {
                 use tauri::Manager;
 
                 while let Some(data) = recv.next().await {
                     let _res = writer.write(&data).await;
                 }
 
-                let state = ahc.state::<super::commands::ActiveConnection>();
+                // Await the reader after aborting it: the port's read half is
+                // only released when that task is actually gone, and the next
+                // connect waits on THIS task to know the port is free.
                 read_process.abort();
-                *state.conn.lock().await = None;
+                let _ = read_process.await;
+
+                let state = ahc.state::<super::commands::ActiveConnection>();
+                if state.is_current(generation) {
+                    *state.conn.lock().await = None;
+                }
             });
 
-            Ok(true)
+            // The writer owns the reader's handle and aborts it on the way out,
+            // so waiting on the writer covers both halves. The OS can still lag
+            // behind the drop, which is what open_port_with_retry absorbs.
+            state.track(write_process).await;
+
+            Ok(generation)
         }
-        Err(e) => {
-            Err(format!("Failed to open the serial port: {}", e.description))
+        Err(e) => Err(format!("Failed to open the serial port: {}", e)),
+    }
+}
+
+/// Open the port, retrying briefly on failure.
+///
+/// Even after the previous owner's handles are dropped, Windows can take a
+/// moment to make a CDC port openable again, and the retry is cheaper than
+/// telling the user to unplug the keyboard.
+fn open_port_with_retry(id: &str) -> Result<tokio_serial::SerialStream, String> {
+    let mut last = String::new();
+    for attempt in 0..5 {
+        match tokio_serial::new(id, 9600).open_native_async() {
+            Ok(port) => return Ok(port),
+            Err(e) => {
+                last = e.description.clone();
+                if attempt < 4 {
+                    std::thread::sleep(std::time::Duration::from_millis(150));
+                }
+            }
         }
     }
+    Err(last)
 }
 
 #[command]

@@ -1,0 +1,29 @@
+{
+  "_comment": "Behaviors the firmware reports but that should not be offered in the keymap editor. Two reasons appear here: some cannot sensibly go on a key at all (the trackball's internal move/scroll, the encoder's sensor behavior), and some are dead in THIS build's configuration. Keyed by the firmware's display name. They still exist on the device — this only stops them being offered as a choice, and a binding that already uses one is still shown, so an existing keymap is never silently rewritten. If a build ever turns these options back on, delete the entry.",
+  "hidden": [
+    {
+      "name": "mouse_move",
+      "why": "Trackball 内部の入力処理用。キーに置いてもポインタが一定方向へ動き続けるだけ"
+    },
+    {
+      "name": "mouse_scroll",
+      "why": "同上。スクロールが一定方向へ流れ続けるだけ"
+    },
+    {
+      "name": "enc_cfg",
+      "why": "エンコーダー回転用の sensor behavior。キーではなく sensor-bindings に繋がっており、実際の動作はエンコーダータブで編集する"
+    },
+    {
+      "name": "Studio Unlock",
+      "why": "この機体は CONFIG_ZMK_STUDIO_LOCKING=n でロック機能自体が無効。押しても何も起きない"
+    },
+    {
+      "name": "Bootloader",
+      "why": "CONFIG_ZMK_CDC_ACM_BOOTLOADER_TRIGGER=y があり USB 経由でブートローダーに入れるため不要。キーを潰す価値がない（万一 USB トリガが効かないときは基板のリセットボタンで入る）"
+    },
+    {
+      "name": "External Power",
+      "why": "この機体の基板・シールドに zmk,ext-power ノードが無く、外部電源を切る制御端子が回路上に存在しない。押しても何も起きない"
+    }
+  ]
+}

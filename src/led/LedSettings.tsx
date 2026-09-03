@@ -3,9 +3,10 @@ import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 
 import { ConnectionContext } from "../rpc/ConnectionContext";
 import { ledReadConfig, ledWriteConfig } from "../backends";
-import { PanelActionBar, PanelStatus } from "../misc/PanelActionBar";
+import { PanelActionBar } from "../misc/PanelActionBar";
+import { usePanelStatus } from "../misc/usePanelStatus";
 import { useT } from "../i18n";
-import { LedCap } from "../caps/toraboCaps";
+import { Feature, LedCap, ToraboCaps, canWriteFeature } from "../caps/toraboCaps";
 import {
   COLOURS,
   COLOUR_AUTO,
@@ -19,14 +20,13 @@ import {
   SIDE_LEFT,
   SIDE_RIGHT,
   USECASES,
+  USECASE_GROUPS,
   UseCase,
   decodeLed,
   emptyRule,
   encodeLed,
   usecaseInfo,
 } from "./ledConfig";
-
-type Status = PanelStatus;
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -57,6 +57,7 @@ function RuleRow({
   first: boolean;
   last: boolean;
 }) {
+  const t = useT();
   const info = usecaseInfo(rule.usecase);
   const indexed = info?.indexed ?? false;
 
@@ -66,10 +67,10 @@ function RuleRow({
   return (
     <div className="flex flex-col gap-2 rounded-md border border-base-300 bg-base-100 p-3">
       <div className="flex flex-wrap items-end gap-3">
-        <Field label="きっかけ">
+        <Field label={t("led.field.trigger")}>
           <select
             className="select select-bordered select-sm w-56"
-            aria-label="use case"
+            aria-label={t("led.aria.usecase")}
             value={rule.usecase}
             onChange={(e) => {
               const usecase = Number(e.target.value) as UseCase;
@@ -80,17 +81,17 @@ function RuleRow({
                 // param means different things per use case; don't carry a stale one.
                 param: usecase === UseCase.BatteryLow ? 15 : 0,
                 // An indexed use case derives its colour from the profile/layer
-                // number. Leaving a fixed colour here would make the row SAY "自動"
-                // while the firmware flashed the same colour for every profile.
+                // number. Leaving a fixed colour here would make the row SAY
+                // "automatic" while the firmware flashed one colour for every profile.
                 colour: nowIndexed ? COLOUR_AUTO : rule.colour || Ch.Red,
               });
             }}
           >
-            {(["警告", "変化の通知", "状態表示"] as const).map((g) => (
-              <optgroup key={g} label={g}>
+            {USECASE_GROUPS.map((g) => (
+              <optgroup key={g} label={t(`led.group.${g}`)}>
                 {USECASES.filter((u) => u.group === g).map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.label}
+                    {t(u.labelKey)}
                   </option>
                 ))}
               </optgroup>
@@ -98,44 +99,44 @@ function RuleRow({
           </select>
         </Field>
 
-        <Field label="色">
+        <Field label={t("led.field.colour")}>
           {indexed ? (
             <span className="text-base-content/60 flex h-8 items-center text-xs">
-              自動（番号ごとに変わる）
+              {t("led.colour.auto")}
             </span>
           ) : (
             <select
               className="select select-bordered select-sm w-36"
-              aria-label="colour"
+              aria-label={t("led.aria.colour")}
               value={rule.colour}
               onChange={(e) => onChange({ ...rule, colour: Number(e.target.value) })}
             >
               {COLOURS.map((c) => (
                 <option key={c.mask} value={c.mask}>
-                  {c.label}
+                  {t(c.labelKey)}
                 </option>
               ))}
             </select>
           )}
         </Field>
 
-        <Field label="光り方">
+        <Field label={t("led.field.pattern")}>
           <select
             className="select select-bordered select-sm w-44"
-            aria-label="pattern"
+            aria-label={t("led.aria.pattern")}
             value={rule.pattern}
             onChange={(e) => onChange({ ...rule, pattern: Number(e.target.value) as Pattern })}
           >
             {PATTERNS.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.label}
+                {t(p.labelKey)}
               </option>
             ))}
           </select>
         </Field>
 
         {rule.usecase === UseCase.BatteryLow && (
-          <Field label="しきい値 (%)">
+          <Field label={t("led.field.threshold")}>
             <input
               type="number"
               className="input input-bordered input-sm w-24"
@@ -148,7 +149,7 @@ function RuleRow({
         )}
 
         {rule.usecase === UseCase.Modifier && (
-          <Field label="どの修飾キー">
+          <Field label={t("led.field.mod")}>
             <div className="flex gap-2">
               {MODS.map((m) => (
                 <label key={m.bit} className="flex items-center gap-1 text-xs">
@@ -169,7 +170,7 @@ function RuleRow({
           <button
             type="button"
             className="btn btn-ghost btn-xs"
-            aria-label="up"
+            aria-label={t("led.aria.moveUp")}
             disabled={first}
             onClick={onMoveUp}
           >
@@ -178,7 +179,7 @@ function RuleRow({
           <button
             type="button"
             className="btn btn-ghost btn-xs"
-            aria-label="down"
+            aria-label={t("led.aria.moveDown")}
             disabled={last}
             onClick={onMoveDown}
           >
@@ -187,7 +188,7 @@ function RuleRow({
           <button
             type="button"
             className="btn btn-ghost btn-xs"
-            aria-label="remove"
+            aria-label={t("led.aria.remove")}
             onClick={onRemove}
           >
             <Trash2 size={14} />
@@ -195,7 +196,9 @@ function RuleRow({
         </div>
       </div>
 
-      {info?.note && <p className="text-base-content/60 text-xs">{info.note}</p>}
+      {info?.noteKey && (
+        <p className="text-base-content/60 text-xs">{t(info.noteKey)}</p>
+      )}
     </div>
   );
 }
@@ -211,6 +214,7 @@ function SidePanel({
   ruleMax: number;
   onChange: (rules: LedRule[]) => void;
 }) {
+  const t = useT();
   const patch = (i: number, r: LedRule) => {
     const next = rules.slice();
     next[i] = r;
@@ -234,18 +238,18 @@ function SidePanel({
           disabled={rules.length >= Math.min(ruleMax, LED_MAX_RULES)}
           onClick={() => onChange([...rules, emptyRule()])}
         >
-          <Plus size={14} /> ルールを追加
+          <Plus size={14} /> {t("led.addRule")}
         </button>
       </div>
 
       {rules.length === 0 ? (
-        <p className="text-base-content/60 text-sm">
-          ルールなし＝消灯（省電力）。「ルールを追加」で光らせる条件を決めます。
-        </p>
+        <p className="text-base-content/60 text-sm">{t("led.noRules")}</p>
       ) : (
         <>
           <p className="text-base-content/60 text-xs">
-            上から順に判定し、<b>最初に当てはまったルールが表示されます</b>。警告を上、常時表示を下に。
+            {t("led.priority.pre")}
+            <b>{t("led.priority.strong")}</b>
+            {t("led.priority.post")}
           </p>
           {rules.map((r, i) => (
             <RuleRow
@@ -271,51 +275,47 @@ function SidePanel({
  * Which halves are shown comes from the firmware's own capability byte, not from
  * an assumption here: the LED's anode rides the extender pad's power rail, so a
  * half without that pad has no working LED and offering it would be a lie.
+ *
+ * @param caps what the connected firmware says it can do, passed down rather
+ *   than read again here (MainPanels has already asked; a second capability read
+ *   would take its turn ahead of this panel's own). Only used to decide whether
+ *   writing is safe — which halves to show comes from the wire's own caps byte.
  */
-export function LedSettings() {
+export function LedSettings({ caps }: { caps?: ToraboCaps | null }) {
   const t = useT();
   const { conn } = useContext(ConnectionContext);
   const [cfg, setCfg] = useState<LedConfig | null>(null);
-  const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const { status, read, write } = usePanelStatus({ onReadFailed: () => setCfg(null) });
 
   useEffect(() => {
     if (!conn) setCfg(null);
   }, [conn]);
 
-  const onRead = async () => {
-    setStatus({ kind: "busy", msg: "読み込み中…" });
-    try {
-      setCfg(decodeLed(await ledReadConfig()));
-      setStatus({ kind: "ok", msg: "読み込みました" });
-    } catch (e) {
-      setCfg(null);
-      setStatus({ kind: "error", msg: String(e) });
-    }
-  };
+  const onRead = () => read(async () => setCfg(decodeLed(await ledReadConfig())));
 
-  const onWrite = async () => {
+  const onWrite = () => {
     if (!cfg) return;
-    setStatus({ kind: "busy", msg: "書き込み中…" });
-    try {
-      await ledWriteConfig(encodeLed(cfg));
-      setStatus({ kind: "ok", msg: "書き込みました（即反映＆本体に保存）" });
-    } catch (e) {
-      setStatus({ kind: "error", msg: String(e) });
-    }
+    return write(async () => ledWriteConfig(encodeLed(cfg)));
   };
 
   const hasLeft = !!cfg && (cfg.caps & LedCap.Left) !== 0;
   const hasRight = !!cfg && (cfg.caps & LedCap.Right) !== 0;
+  // The firmware's wire is newer than encodeLed can produce: read, but never
+  // write back a config with the fields we couldn't decode stripped out.
+  const writeBlocked = !canWriteFeature(caps ?? null, Feature.Led);
 
   return (
     <div className="flex flex-col items-start gap-4 p-4">
       <div className="text-base-content/70 text-sm">
         <p>
-          拡張基盤の3色LEDを、<b>左右それぞれ独立に</b>設定します。
+          {t("led.intro.pre")}
+          <b>{t("led.intro.strong")}</b>
+          {t("led.intro.post")}
         </p>
         <p>
-          明るさは変えられません（PWMなし）。<b>電池を左右するのは「光り方」</b>で、
-          ゆっくり点滅は点灯の約1/40しか食いません。
+          {t("led.power.pre")}
+          <b>{t("led.power.strong")}</b>
+          {t("led.power.post")}
         </p>
       </div>
 
@@ -323,20 +323,19 @@ export function LedSettings() {
         onRead={onRead}
         onWrite={onWrite}
         writeDisabled={!cfg || status.kind === "busy"}
+        writeBlocked={writeBlocked}
         status={status}
       />
 
       {!cfg ? (
         <p className="text-base-content/70 text-sm">{t("empty.read")}</p>
       ) : !hasLeft && !hasRight ? (
-        <p className="text-base-content/70 text-sm">
-          このキーボードにはLEDが載っていません（拡張LED基盤＋拡張パッドが必要です）。
-        </p>
+        <p className="text-base-content/70 text-sm">{t("led.noHardware")}</p>
       ) : (
         <div className="flex w-full flex-col gap-4 lg:flex-row">
           {hasLeft && (
             <SidePanel
-              title="左"
+              title={t("led.side.left")}
               rules={cfg.sides[SIDE_LEFT] ?? []}
               ruleMax={cfg.ruleMax}
               onChange={(rules) => {
@@ -348,7 +347,7 @@ export function LedSettings() {
           )}
           {hasRight && (
             <SidePanel
-              title="右"
+              title={t("led.side.right")}
               rules={cfg.sides[SIDE_RIGHT] ?? []}
               ruleMax={cfg.ruleMax}
               onChange={(rules) => {

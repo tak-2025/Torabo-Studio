@@ -40,7 +40,13 @@ pub async fn gatt_connect(
     id: String,
     app_handle: AppHandle,
     state: State<'_, super::commands::ActiveConnection<'_>>,
-) -> Result<bool, String> {
+) -> Result<u64, String> {
+    // Close the previous link first, and wait for the tasks holding its
+    // notification subscription to finish. Reconnecting — to this device or to
+    // a different keyboard — while the old subscription is still live is how a
+    // wedged session used to poison every later connection.
+    let generation = state.begin().await;
+
     let adapter = Adapter::default().await.ok_or("Failed to access the BT adapter".to_string())?;
 
     adapter.wait_available().await.map_err(|e| format!("Failed to wait for the BT adapter access: {}", e.message()))?;
@@ -51,6 +57,12 @@ pub async fn gatt_connect(
     if !d.is_connected().await {
         adapter.connect_device(&d).await.map_err(|e| format!("Failed to connect to the device: {}", e.message()))?;
     }
+
+    // Every event below is addressed to this link's id, so a listener still
+    // attached to an older link never sees this one's traffic — and, more
+    // importantly, this link is never torn down by an older one winding down.
+    let data_event = format!("connection_data:{}", generation);
+    let gone_event = format!("connection_disconnected:{}", generation);
 
     // Retain a handle to the connected device so a secondary GATT service (the
     // trackball config service) can be accessed without disturbing the RPC link.
@@ -87,7 +99,7 @@ pub async fn gatt_connect(
                         while let Some(item) = n.next().await {
                             match item {
                                 Ok(vn) => {
-                                    let _ = ah1.emit("connection_data", vn.clone());
+                                    let _ = ah1.emit(&data_event, vn.clone());
                                 }
                                 Err(e) => {
                                     // A notification-stream error usually precedes a
@@ -107,6 +119,7 @@ pub async fn gatt_connect(
             });
 
             let ah2 = app_handle.clone();
+            let gone_on_disconnect = gone_event.clone();
             let disconnect_handle = tauri::async_runtime::spawn(async move {
                 // Need to keep adapter from being dropped while active/connected
                 let a = adapter;
@@ -118,12 +131,16 @@ pub async fn gatt_connect(
                     while let Some(ev) = events.next().await {
                         if ev == ConnectionEvent::Disconnected {
                             eprintln!("[gatt] device reported Disconnected event");
+                            // Only clear the slot if it is still ours: this device
+                            // may have been replaced by another link already.
                             let state = ah2.state::<super::commands::ActiveConnection>();
-                            *state.conn.lock().await = None;
-                            *state.device.lock().await = None;
+                            if state.is_current(generation) {
+                                *state.conn.lock().await = None;
+                                *state.device.lock().await = None;
+                            }
 
-                            if let Err(e) = ah2.emit("connection_disconnected", ()) {
-                                eprintln!("[gatt] failed to emit connection_disconnected: {:?}", e);
+                            if let Err(e) = ah2.emit(&gone_on_disconnect, ()) {
+                                eprintln!("[gatt] failed to emit {}: {:?}", gone_on_disconnect, e);
                             }
                         }
                     }
@@ -133,7 +150,7 @@ pub async fn gatt_connect(
             let (send, mut recv) = channel(5);
             *state.conn.lock().await = Some(Box::new(send));
             let ah3 = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
+            let write_process = tauri::async_runtime::spawn(async move {
                 use tauri::Emitter;
                 use tauri::Manager;
 
@@ -164,15 +181,26 @@ pub async fn gatt_connect(
                 // error. Either way, make sure the rest of the app sees the
                 // connection as gone rather than silently wedged.
                 let state = ah3.state::<super::commands::ActiveConnection>();
-                *state.conn.lock().await = None;
-                *state.device.lock().await = None;
-                let _ = ah3.emit("connection_disconnected", ());
+                if state.is_current(generation) {
+                    *state.conn.lock().await = None;
+                    *state.device.lock().await = None;
+                }
+                let _ = ah3.emit(&gone_event, ());
 
+                // Await them after aborting: the notification subscription is
+                // only released when the task is actually gone, and the next
+                // connect waits on THIS task to know the device is free.
                 disconnect_handle.abort();
+                let _ = disconnect_handle.await;
                 notify_handle.abort();
+                let _ = notify_handle.await;
             });
 
-            Ok(true)
+            // The pump owns the notify/disconnect handles and aborts them on the
+            // way out, so waiting on it covers this link's whole subscription.
+            state.track(write_process).await;
+
+            Ok(generation)
         }
     }
 }

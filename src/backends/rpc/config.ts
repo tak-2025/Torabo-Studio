@@ -4,6 +4,7 @@ import {
   TunnelStatus,
 } from "@zmkfirmware/zmk-studio-ts-client/torabo";
 
+import { tr } from "../../i18n";
 import { call_rpc } from "../../rpc/logging";
 import { isTauri, type ToraboBackend, type ToraboConfigBackend } from "../types";
 import * as tauriFiles from "../tauri/files";
@@ -46,20 +47,24 @@ export const TunnelFeature = {
 } as const;
 export type TunnelFeature = (typeof TunnelFeature)[keyof typeof TunnelFeature];
 
+/** Message keys, not text: the label is resolved at the moment it is shown. */
 const FEATURE_LABEL: Record<number, string> = {
-  [TunnelFeature.Caps]: "機能一覧",
-  [TunnelFeature.Trackball]: "トラックボール",
-  [TunnelFeature.Macros]: "マクロ",
-  [TunnelFeature.Combos]: "コンボ",
-  [TunnelFeature.Trackpad]: "トラックパッド",
-  [TunnelFeature.Encoder]: "エンコーダー",
-  [TunnelFeature.Led]: "LED",
-  [TunnelFeature.LiveFeed]: "ライブ表示",
-  [TunnelFeature.Timing]: "タップ反応",
+  [TunnelFeature.Caps]: "sys.tunnel.feature.caps",
+  [TunnelFeature.Trackball]: "sys.tunnel.feature.trackball",
+  [TunnelFeature.Macros]: "sys.tunnel.feature.macros",
+  [TunnelFeature.Combos]: "sys.tunnel.feature.combos",
+  [TunnelFeature.Trackpad]: "sys.tunnel.feature.trackpad",
+  [TunnelFeature.Encoder]: "sys.tunnel.feature.encoder",
+  [TunnelFeature.Led]: "sys.tunnel.feature.led",
+  [TunnelFeature.LiveFeed]: "sys.tunnel.feature.liveFeed",
+  [TunnelFeature.Timing]: "sys.tunnel.feature.timing",
 };
 
 function label(feature: number): string {
-  return FEATURE_LABEL[feature] ?? `feature 0x${feature.toString(16)}`;
+  const key = FEATURE_LABEL[feature];
+  return key
+    ? tr(key)
+    : tr("sys.tunnel.feature.unknown", { id: feature.toString(16) });
 }
 
 /** Reused for every request that carries no payload; never mutated. */
@@ -68,13 +73,13 @@ const NO_BLOB = new Uint8Array(0);
 function statusText(status: TunnelStatus): string {
   switch (status) {
     case TunnelStatus.ZMK_TORABO_TUNNEL_STATUS_UNSUPPORTED_FEATURE:
-      return "この機能を含まないファームウェアです";
+      return tr("sys.tunnel.status.unsupported");
     case TunnelStatus.ZMK_TORABO_TUNNEL_STATUS_INVALID:
-      return "送ったデータをファームウェアが受け付けませんでした（アプリとファームウェアのバージョンが合っていない可能性があります）";
+      return tr("sys.tunnel.status.invalid");
     case TunnelStatus.ZMK_TORABO_TUNNEL_STATUS_ERROR:
-      return "ファームウェア側の処理に失敗しました";
+      return tr("sys.tunnel.status.error");
     default:
-      return `不明なステータス ${status}`;
+      return tr("sys.tunnel.status.unknown", { status });
   }
 }
 
@@ -109,7 +114,7 @@ async function tunnel(
     // is what registers this backend at all, reaching here means the link
     // changed under us rather than that the firmware is old.
     throw new Error(
-      `${label(feature)} の要求に対して、キーボードがトンネル応答を返しませんでした。`,
+      tr("sys.tunnel.noResponse", { feature: label(feature) }),
     );
   }
   // OK is the proto3 default and never reaches the wire, so an absent status

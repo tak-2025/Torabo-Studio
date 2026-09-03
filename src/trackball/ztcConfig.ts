@@ -20,6 +20,8 @@
  * rejected for no gain. Always Read before Save.
  */
 
+import { tr } from "../i18n";
+
 export const ZTC_MAGIC = 0x7a74;
 export const ZTC_VERSION_V2 = 2;
 export const ZTC_VERSION_V3 = 3;
@@ -53,10 +55,12 @@ export enum Role {
   Off = 2,
 }
 
-export const ROLE_LABELS: Record<Role, string> = {
-  [Role.Move]: "カーソル移動（Move）",
-  [Role.Scroll]: "スクロール（Scroll）",
-  [Role.Off]: "無効（Off）",
+/** Message keys, not text — the panel resolves them with `t()` so the labels
+ * follow the language toggle. See src/i18n/panels/trackball.ts. */
+export const ROLE_LABEL_KEYS: Record<Role, string> = {
+  [Role.Move]: "tb.role.move",
+  [Role.Scroll]: "tb.role.scroll",
+  [Role.Off]: "tb.role.off",
 };
 
 export interface AxisCfg {
@@ -123,17 +127,21 @@ function roleOf(v: number): Role {
 
 export function decodeZtc(bytes: Uint8Array): ZtcConfig {
   if (bytes.length < ZTC_HDR) {
-    throw new Error(`Unexpected trackball config size ${bytes.length}`);
+    throw new Error(tr("tb.err.size", { size: bytes.length }));
   }
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const magic = dv.getUint16(0, true);
   if (magic !== ZTC_MAGIC) {
-    throw new Error(`Bad magic 0x${magic.toString(16)} (firmware/app mismatch)`);
+    throw new Error(tr("tb.err.magic", { magic: magic.toString(16) }));
   }
   const version = dv.getUint8(2);
   if (version !== ZTC_VERSION_V2 && version !== ZTC_VERSION_V3) {
     throw new Error(
-      `Unsupported config version ${version} (expected ${ZTC_VERSION_V2} or ${ZTC_VERSION_V3})`,
+      tr("tb.err.version", {
+        version,
+        v2: ZTC_VERSION_V2,
+        v3: ZTC_VERSION_V3,
+      }),
     );
   }
   // The trailer is 4 B and a layer is 12, so the two lengths can never collide —
@@ -141,7 +149,7 @@ export function decodeZtc(bytes: Uint8Array): ZtcConfig {
   const hasCoast = version === ZTC_VERSION_V3;
   const body = bytes.length - ZTC_HDR - (hasCoast ? ZTC_COAST : 0);
   if (body < 0 || body % ZTC_LAYER !== 0) {
-    throw new Error(`Unexpected trackball config size ${bytes.length} (v${version})`);
+    throw new Error(tr("tb.err.sizeV", { size: bytes.length, version }));
   }
   const tempTarget = dv.getUint8(4);
   const tempTimeoutMs = dv.getUint16(6, true);
