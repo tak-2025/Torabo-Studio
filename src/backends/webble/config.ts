@@ -1,6 +1,12 @@
 import { tr } from "../../i18n";
 import type { ToraboConfigBackend } from "../types";
-import { CONFIG_SERVICES, type ConfigKey, type ConfigService } from "./uuids";
+import {
+  CONFIG_SERVICES,
+  formatAcceptedLengths,
+  isAcceptedLength,
+  type ConfigKey,
+  type ConfigService,
+} from "./uuids";
 
 /**
  * The torabo config services over Web Bluetooth.
@@ -121,12 +127,12 @@ export function makeConfigBackend(
     // emptiness to the keyboard. Every other config is checked by its own
     // decoder against a length derived from its header, so it fails loudly on
     // its own and does not need a second opinion here.
-    if (spec.exactLength !== null && bytes.length !== spec.exactLength) {
+    if (!isAcceptedLength(spec.exactLength, bytes.length)) {
       throw new Error(
         tr("sys.cfg.readShort", {
           label: spec.label,
           got: bytes.length,
-          need: spec.exactLength,
+          need: formatAcceptedLengths(spec.exactLength),
           cause: tr(
             bytes.length === 512
               ? "sys.cfg.readShort.att"

@@ -20,18 +20,38 @@ import {
   vacantCells,
 } from "./moduleLayout";
 import {
+  CapsSide,
   Feature,
   FeatureInfo,
   LedCap,
+  ModuleKind,
   ToraboCaps,
+  TrackballCap,
   TrackpadCap,
 } from "./toraboCaps";
 import { TpConn, TpKind, TpSide, encodeMeta } from "../trackpad/tpConfigV2";
 
-function caps(features: { id: number; wireVer?: number; caps?: number }[]): ToraboCaps {
+/** A Feature.Modules row's caps word from the four slot kinds, in the fixed
+ * left-std/left-ext/right-std/right-ext order moduleSlots() decodes. */
+function modulesCaps(
+  leftStd: ModuleKind,
+  leftExt: ModuleKind,
+  rightStd: ModuleKind,
+  rightExt: ModuleKind,
+): number {
+  return leftStd | (leftExt << 4) | (rightStd << 8) | (rightExt << 12);
+}
+
+function caps(
+  features: { id: number; wireVer?: number; caps?: number }[],
+  /** `_rsv` bit0-1. Omitted = CapsSide.Unknown, matching every
+   * pre-declaration descriptor byte-for-byte. */
+  hdrCentralSide?: CapsSide,
+): ToraboCaps {
   return {
     descVersion: 1,
     fw: { major: 0, minor: 5, patch: 0 },
+    hdrCentralSide,
     features: features.map(
       (f): FeatureInfo => ({
         id: f.id as Feature,
@@ -423,5 +443,251 @@ describe("deriveModuleLayout: degraded reads", () => {
     expect(deriveModuleLayout(caps([{ id: Feature.Trackpad }]), [])!.notes).toEqual(
       [],
     );
+  });
+});
+
+/**
+ * Feature.Modules (id 11, TORABO_FEAT_MODULES, redesigned 2026-09-04): the
+ * firmware may now DECLARE central side (header `_rsv`, unchanged) and, in
+ * ONE unified caps word, what each of the four connectors carries — instead
+ * of this module having to infer it. Declared pad/ball/encoder slots render
+ * as REPORTS (no `inferred: true`, i.e. a solid badge in FirmwareInfoPanel),
+ * same as a device the trackpad wire itself placed; a declared "None" (4)
+ * renders as its own subdued marker and blocks inference from landing there.
+ * Golden word is the real descriptor observed on hardware: 0x1213 = encoder
+ * on left standard, pad on left extension, ball on right standard, pad on
+ * right extension.
+ */
+describe("deriveModuleLayout: Feature.Modules declaration", () => {
+  describe("central side: header _rsv takes priority over the LED bit", () => {
+    it("prefers _rsv over a contradicting LED CentralIsLeft bit", () => {
+      const layout = deriveModuleLayout(
+        caps(
+          [{ id: Feature.Led, caps: LedCap.Left | LedCap.CentralIsLeft }],
+          CapsSide.Right, // _rsv says Right even though the LED bit says Left
+        ),
+        null,
+      )!;
+      expect(layout.central).toBe(TpSide.Right);
+    });
+
+    it("falls back to the LED bit when _rsv is Unknown (pre-declaration firmware)", () => {
+      const layout = deriveModuleLayout(
+        caps(
+          [{ id: Feature.Led, caps: LedCap.Left | LedCap.CentralIsLeft }],
+          CapsSide.Unknown,
+        ),
+        null,
+      )!;
+      expect(layout.central).toBe(TpSide.Left);
+    });
+
+    it("reports central from _rsv alone, with no LED module in the build at all", () => {
+      // The hole this closes: an LED-less build has no LedCap entry to fall
+      // back to, but _rsv is independent of any feature.
+      const layout = deriveModuleLayout(
+        caps([{ id: Feature.Trackball, wireVer: 3 }], CapsSide.Right),
+        null,
+      )!;
+      expect(layout.central).toBe(TpSide.Right);
+    });
+  });
+
+  describe("golden: 0x1213 reports all four cells, undashed", () => {
+    it("places encoder/pad/ball/pad exactly where declared, no unplaced, no inference", () => {
+      const layout = deriveModuleLayout(
+        caps([{ id: Feature.Modules, caps: 0x1213 }]),
+        null,
+      )!;
+      expect(cell(layout, TpSide.Left, TpConn.Standard).items).toEqual([
+        { key: "tp.kind.encoder" },
+      ]);
+      expect(cell(layout, TpSide.Left, TpConn.Extension).items).toEqual([
+        { key: "tp.kind.trackpad" },
+      ]);
+      expect(cell(layout, TpSide.Right, TpConn.Standard).items).toEqual([
+        { key: "tp.kind.trackball" },
+      ]);
+      expect(cell(layout, TpSide.Right, TpConn.Extension).items).toEqual([
+        { key: "tp.kind.trackpad" },
+      ]);
+      expect(layout.unplaced).toEqual([]);
+      // None of the four cells carry `inferred: true` — nothing here is a guess.
+      for (const c of layout.cells) {
+        expect(c.items.every((i) => !i.inferred)).toBe(true);
+      }
+    });
+
+    it("does not need `central` at all once every slot is declared", () => {
+      // Unlike the pre-declaration inference, a declared slot does not depend
+      // on knowing which half is central — it names its own connector directly.
+      const layout = deriveModuleLayout(
+        caps([{ id: Feature.Modules, caps: 0x1213 }]), // no LED, no _rsv
+        null,
+      )!;
+      expect(layout.central).toBeNull();
+      expect(cell(layout, TpSide.Right, TpConn.Standard).items).toEqual([
+        { key: "tp.kind.trackball" },
+      ]);
+    });
+  });
+
+  describe("None (4): an explicit empty marker that blocks inference", () => {
+    it("renders as a subdued, non-inferred marker", () => {
+      const layout = deriveModuleLayout(
+        caps([{ id: Feature.Modules, caps: modulesCaps(ModuleKind.None, 0, 0, 0) }]),
+        null,
+      )!;
+      expect(cell(layout, TpSide.Left, TpConn.Standard).items).toEqual([
+        { key: "fw.mod.none", empty: true },
+      ]);
+    });
+
+    it("suppresses the trackball's central-seat inference at that cell", () => {
+      // Central is the left half; leftStd is declared None. Without the
+      // declaration this would be exactly the "seats it on the central's
+      // standard FFC" case (see the trackball describe block above) — the
+      // None here must stop that from happening.
+      const layout = deriveModuleLayout(
+        caps(
+          [
+            { id: Feature.Trackball, wireVer: 3 },
+            { id: Feature.Modules, caps: modulesCaps(ModuleKind.None, 0, 0, 0) },
+          ],
+          CapsSide.Left,
+        ),
+        null,
+      )!;
+      expect(cell(layout, TpSide.Left, TpConn.Standard).items).toEqual([
+        { key: "fw.mod.none", empty: true },
+      ]);
+      expect(layout.unplaced).toEqual([{ key: "fw.mod.trackball" }]);
+    });
+
+    it("suppresses the encoder's elimination inference at that cell", () => {
+      // Three of four cells taken by trackpad-wire pads; the fourth (left
+      // standard) is declared None instead of being left for the encoder's
+      // one-cell-left elimination to claim.
+      const layout = deriveModuleLayout(
+        caps([
+          { id: Feature.Encoder },
+          { id: Feature.Modules, caps: modulesCaps(ModuleKind.None, 0, 0, 0) },
+        ]),
+        [
+          { deviceId: 0, meta: meta(TpSide.Left, TpConn.Extension, TpKind.Trackpad) },
+          { deviceId: 1, meta: meta(TpSide.Right, TpConn.Extension, TpKind.Trackpad) },
+          { deviceId: 2, meta: meta(TpSide.Right, TpConn.Standard, TpKind.Trackpad) },
+        ],
+      )!;
+      expect(cell(layout, TpSide.Left, TpConn.Standard).items).toEqual([
+        { key: "fw.mod.none", empty: true },
+      ]);
+      expect(layout.unplaced).toEqual([{ key: "fw.mod.encoder" }]);
+    });
+  });
+
+  describe("falls back to the pre-declaration estimate when every slot is 0", () => {
+    it("trackball: seats it on the central's standard FFC, same as an absent row", () => {
+      const layout = deriveModuleLayout(
+        caps(
+          [
+            { id: Feature.Trackball, wireVer: 3, caps: TrackballCap.Coast },
+            { id: Feature.Modules, caps: 0x0000 },
+            { id: Feature.Led, caps: LedCap.Right },
+          ],
+          undefined,
+        ),
+        null,
+      )!;
+      expect(cell(layout, TpSide.Right, TpConn.Standard).items).toEqual([
+        { key: "tp.kind.trackball", inferred: true },
+      ]);
+    });
+
+    it("encoder: falls back to elimination", () => {
+      const layout = deriveModuleLayout(
+        caps([
+          { id: Feature.Encoder },
+          { id: Feature.Trackball, wireVer: 3 },
+          { id: Feature.Modules, caps: 0x0000 },
+          { id: Feature.Led, caps: LedCap.Left | LedCap.Right }, // central = right
+        ]),
+        [
+          { deviceId: 0, meta: meta(TpSide.Left, TpConn.Extension, TpKind.Trackpad) },
+          { deviceId: 1, meta: meta(TpSide.Right, TpConn.Extension, TpKind.Trackpad) },
+        ],
+      )!;
+      expect(cell(layout, TpSide.Left, TpConn.Standard).items).toEqual([
+        { key: "tp.kind.encoder", inferred: true },
+      ]);
+    });
+  });
+
+  describe("dedupe against the trackpad wire: same connector, same physical device", () => {
+    it("a declared pad matching the wire's own report is not stacked", () => {
+      const layout = deriveModuleLayout(
+        caps([
+          { id: Feature.Trackpad, wireVer: 3 },
+          { id: Feature.Modules, caps: modulesCaps(0, ModuleKind.Pad, 0, 0) },
+        ]),
+        [{ deviceId: 0, meta: meta(TpSide.Left, TpConn.Extension, TpKind.Trackpad) }],
+      )!;
+      // One badge, not two — and it is the wire's own richer label.
+      expect(keys(layout, TpSide.Left, TpConn.Extension)).toEqual([
+        "tp.kind.trackpad",
+      ]);
+      expect(layout.unplaced).toEqual([]);
+    });
+
+    it("guard: a declared ball that contradicts a trackpad-wire pad on the same connector is not placed twice", () => {
+      // One connector, one device. The trackpad wire already reported a pad
+      // on the right standard FFC; Feature.Modules also declares a ball
+      // there. That is a genuine contradiction in what the firmware sent —
+      // the section cannot show two modules in one cell, so the declared
+      // ball is dropped to the unplaced list instead of overwriting the
+      // wire's own report.
+      const layout = deriveModuleLayout(
+        caps([
+          { id: Feature.Trackball, wireVer: 3 },
+          { id: Feature.Trackpad, wireVer: 3 },
+          { id: Feature.Modules, caps: modulesCaps(0, 0, ModuleKind.Ball, 0) },
+        ]),
+        [{ deviceId: 0, meta: meta(TpSide.Right, TpConn.Standard, TpKind.Trackpad) }],
+      )!;
+      expect(keys(layout, TpSide.Right, TpConn.Standard)).toEqual([
+        "tp.kind.trackpad",
+      ]);
+      expect(layout.unplaced).toEqual([{ key: "fw.mod.trackball" }]);
+    });
+
+    it("guard: a declared encoder that contradicts a trackpad-wire pad on the same connector is not placed twice", () => {
+      const layout = deriveModuleLayout(
+        caps([
+          { id: Feature.Encoder },
+          { id: Feature.Trackpad, wireVer: 3 },
+          { id: Feature.Modules, caps: modulesCaps(0, ModuleKind.Encoder, 0, 0) },
+        ]),
+        [{ deviceId: 0, meta: meta(TpSide.Left, TpConn.Extension, TpKind.Trackpad) }],
+      )!;
+      expect(keys(layout, TpSide.Left, TpConn.Extension)).toEqual([
+        "tp.kind.trackpad",
+      ]);
+      expect(layout.unplaced).toEqual([{ key: "fw.mod.encoder" }]);
+    });
+  });
+
+  describe("row absent entirely (older firmware)", () => {
+    it("behaves exactly like caps 0x0000 — full inference", () => {
+      const layout = deriveModuleLayout(
+        caps([
+          { id: Feature.Trackball, wireVer: 3, caps: TrackballCap.Coast },
+          { id: Feature.Led, caps: LedCap.Right },
+        ]),
+        null,
+      )!;
+      expect(cell(layout, TpSide.Right, TpConn.Standard).items).toEqual([
+        { key: "tp.kind.trackball", inferred: true },
+      ]);
+    });
   });
 });

@@ -10,22 +10,11 @@ import type { Notification } from "@zmkfirmware/zmk-studio-ts-client/studio";
 import { ConnectionState, ConnectionContext } from "./rpc/ConnectionContext";
 import { Dispatch, useCallback, useEffect, useState } from "react";
 import { ConnectModal, TransportFactory } from "./ConnectModal";
-import { tr, useT } from "./i18n";
+import { useT } from "./i18n";
 
 import type { RpcTransport } from "@zmkfirmware/zmk-studio-ts-client/transport/index";
-import { connect as serial_connect } from "@zmkfirmware/zmk-studio-ts-client/transport/serial";
-import { connect as webble_connect } from "./backends/webble/transport";
-import {
-  connect as tauri_ble_connect,
-  list_devices as ble_list_devices,
-} from "./backends/tauri/ble";
-import {
-  connect as tauri_serial_connect,
-  list_devices as serial_list_devices,
-} from "./backends/tauri/serial";
 import {
   clearTauriGattAccess,
-  isTauri,
   refreshTauriGattAccess,
   registerBackend,
   registeredBackend,
@@ -33,8 +22,10 @@ import {
 } from "./backends";
 import type { ToraboBackend } from "./backends";
 import { makeRpcBackend, probeRpcTunnel } from "./backends/rpc/config";
+import { registerPlatformTransports } from "./platform/transports";
 import MainPanels from "./MainPanels";
 import { MacroNamesProvider } from "./dynamic_macros/MacroNamesContext";
+import { SyncStatusProvider } from "./rpc/SyncStatusContext";
 import { UndoRedoContext, useUndoRedo } from "./undoRedo";
 import { usePub, useSub } from "./usePubSub";
 import { LockState } from "@zmkfirmware/zmk-studio-ts-client/core";
@@ -45,95 +36,10 @@ import { AppFooter } from "./AppFooter";
 import { AboutModal } from "./AboutModal";
 import { LicenseNoticeModal } from "./misc/LicenseNoticeModal";
 
-/**
- * Whether the browser can reconnect to an already-granted keyboard without the
- * chooser. Edge 151 and Chromium cannot; without it there is no way to reach a
- * keyboard that is connected to this PC, because it stops advertising and the
- * chooser only ever lists what is advertising.
- */
-const canReconnectSilently =
-  typeof navigator.bluetooth?.getDevices === "function";
-
-const TRANSPORTS: TransportFactory[] = [
-  navigator.serial && {
-    label: "USB",
-    isUsb: true,
-    // What this reaches depends on the firmware, not on the browser: with the
-    // settings tunnel the RPC carries the torabo config too, and without it the
-    // config lives on GATT where a cable cannot see it. The note says both.
-    // Only shown in the browser picker; the desktop build overrides this entry
-    // below and its device list has no per-transport notes.
-    noteKey: isTauri() ? undefined : "connect.note.webSerial",
-    connect: serial_connect,
-  },
-  // Our own Web Bluetooth transport, not the ts-client one: it keeps the GATT
-  // server so the torabo config services are reachable on the same link. It also
-  // is not gated to Linux — upstream restricts its transport that way, but this
-  // keyboard's encrypted characteristics have been exercised from Chrome on
-  // Windows (see Torabo-Float-Web), so the gate would only remove a path that
-  // works. A platform where it genuinely fails reports it at connect time.
-  ...(!isTauri() && navigator.bluetooth
-    ? [
-        {
-          label: "Bluetooth",
-          isWireless: true,
-          // Reconnects silently where the browser can do that; otherwise opens
-          // a chooser listing keyboards rather than every radio in range.
-          noteKey: canReconnectSilently
-            ? "connect.note.webBluetooth"
-            : "connect.note.webBluetoothChoose",
-          // A keyboard already connected to this PC cannot be in the list at
-          // all. Getting it there is fiddly, and easy to get stuck halfway
-          // through, so the procedure is spelled out rather than hinted at.
-          stepKeys: [
-            "connect.steps.open",
-            "connect.steps.switch",
-            "connect.steps.switchBack",
-            "connect.steps.select",
-          ],
-          connect: () => webble_connect(),
-        },
-        // The filter only matches a keyboard that is discoverable at that
-        // moment, and only on what ZMK happens to broadcast. Neither is
-        // guaranteed, so there is always a way to see everything.
-        {
-          // A getter, not a plain string: TRANSPORTS is built once at module
-          // load, before the language is known, and must still follow the
-          // header's language toggle. Every other label here is a proper noun.
-          get label() {
-            return tr("sys.transport.bluetoothAll");
-          },
-          isWireless: true,
-          noteKey: "connect.note.webBluetoothAll",
-          connect: () => webble_connect({ allDevices: true }),
-        },
-      ]
-    : []),
-  ...(isTauri()
-    ? [
-        {
-          label: "Bluetooth",
-          isWireless: true,
-          pick_and_connect: {
-            connect: tauri_ble_connect,
-            list: ble_list_devices,
-          },
-        },
-      ]
-    : []),
-  ...(isTauri()
-    ? [
-        {
-          label: "USB",
-          isUsb: true,
-          pick_and_connect: {
-            connect: tauri_serial_connect,
-            list: serial_list_devices,
-          },
-        },
-      ]
-    : []),
-].filter((t) => t !== undefined);
+// Which radios this build can reach a keyboard over. Studio and the Android
+// (Capacitor) shell genuinely disagree here — see platform/transports.tsx's
+// header comment for why that file, not this constant, is the seam.
+const TRANSPORTS: TransportFactory[] = registerPlatformTransports();
 
 async function listen_for_notifications(
   notification_stream: ReadableStream<Notification>,
@@ -507,41 +413,46 @@ function App() {
     <ConnectionContext.Provider value={conn}>
       <LockStateContext.Provider value={lockState}>
         <UndoRedoContext.Provider value={doIt}>
-          <UnlockModal />
-          <ConnectModal
-            open={!conn.conn}
-            transports={TRANSPORTS}
-            onTransportCreated={onConnect}
-          />
-          <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />
-          <LicenseNoticeModal
-            open={showLicenseNotice}
-            onClose={() => setShowLicenseNotice(false)}
-          />
-          <div className="bg-base-100 text-base-content h-full max-h-[100vh] w-full max-w-[100vw] inline-grid grid-cols-[auto] grid-rows-[auto_1fr_auto] overflow-hidden">
-            <AppHeader
-              connectedDeviceLabel={connectedDeviceName}
-              canUndo={canUndo}
-              canRedo={canRedo}
-              onUndo={undo}
-              onRedo={redo}
-              onSave={save}
-              onDiscard={discard}
-              onDisconnect={disconnect}
-              onResetSettings={resetSettings}
+          {/* Wraps AppHeader (the status line's one reader) and MainPanels
+              (home to every step's own loading flag, which is what feeds it)
+              alike — see rpc/SyncStatusContext's header comment. */}
+          <SyncStatusProvider>
+            <UnlockModal />
+            <ConnectModal
+              open={!conn.conn}
+              transports={TRANSPORTS}
+              onTransportCreated={onConnect}
             />
-            {/* Macro slot names travel from the macros panel to the keymap
-                board's `&dmac` keycaps; both live inside MainPanels but have
-                no other reason to know about each other. See
-                dynamic_macros/MacroNamesContext. */}
-            <MacroNamesProvider>
-              <MainPanels />
-            </MacroNamesProvider>
-            <AppFooter
-              onShowAbout={() => setShowAbout(true)}
-              onShowLicenseNotice={() => setShowLicenseNotice(true)}
+            <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />
+            <LicenseNoticeModal
+              open={showLicenseNotice}
+              onClose={() => setShowLicenseNotice(false)}
             />
-          </div>
+            <div className="bg-base-100 text-base-content h-full max-h-[100vh] w-full max-w-[100vw] inline-grid grid-cols-[auto] grid-rows-[auto_1fr_auto] overflow-hidden">
+              <AppHeader
+                connectedDeviceLabel={connectedDeviceName}
+                canUndo={canUndo}
+                canRedo={canRedo}
+                onUndo={undo}
+                onRedo={redo}
+                onSave={save}
+                onDiscard={discard}
+                onDisconnect={disconnect}
+                onResetSettings={resetSettings}
+              />
+              {/* Macro slot names travel from the macros panel to the keymap
+                  board's `&dmac` keycaps; both live inside MainPanels but have
+                  no other reason to know about each other. See
+                  dynamic_macros/MacroNamesContext. */}
+              <MacroNamesProvider>
+                <MainPanels />
+              </MacroNamesProvider>
+              <AppFooter
+                onShowAbout={() => setShowAbout(true)}
+                onShowLicenseNotice={() => setShowLicenseNotice(true)}
+              />
+            </div>
+          </SyncStatusProvider>
         </UndoRedoContext.Provider>
       </LockStateContext.Provider>
     </ConnectionContext.Provider>

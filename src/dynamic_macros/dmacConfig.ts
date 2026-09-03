@@ -82,6 +82,26 @@ const READ_SLOT = 1 + DM_STEPS * STEP;
 /** v2 name-block entry: name_len u8 + name[DM_NAME_MAX]. */
 const READ_NAME = 1 + DM_NAME_MAX;
 
+/**
+ * Bytes a full v1 READ returns: header + slot_count * step-slots.
+ * = 4 + 20 * 81 = 1624 B, per this file's header comment and
+ * DESIGN-macros.md §4. This is also every steps WRITE's shape's basis — see
+ * encodeSlot — but that command is per-slot, not this full-image size.
+ */
+export const DM_WIRE_LEN_V1 = READ_HDR + DM_SLOTS * READ_SLOT;
+/**
+ * Bytes a full v2 READ returns: the v1 image plus the appended name block.
+ * = 1624 + 20 * 17 = 1964 B, inside the 2048 B tunnel blob budget (see the
+ * header comment).
+ */
+export const DM_WIRE_LEN_V2 = DM_WIRE_LEN_V1 + DM_SLOTS * READ_NAME;
+/**
+ * Every wire length this codec's decoder accepts, v1 and v2. When this codec
+ * learns a new wire version, add its length here — the transport gate reads
+ * this list.
+ */
+export const DM_WIRE_LENS = [DM_WIRE_LEN_V1, DM_WIRE_LEN_V2] as const;
+
 export enum DmAction {
   Tap = 0,
   Press = 1,

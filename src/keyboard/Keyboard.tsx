@@ -19,6 +19,8 @@ import {
 } from "@zmkfirmware/zmk-studio-ts-client/keymap";
 import type { GetBehaviorDetailsResponse } from "@zmkfirmware/zmk-studio-ts-client/behaviors";
 
+import { X } from "lucide-react";
+
 import { LayerPicker } from "./LayerPicker";
 import { PhysicalLayoutPicker } from "./PhysicalLayoutPicker";
 import { Keymap as KeymapComp } from "./Keymap";
@@ -31,6 +33,7 @@ import { LockStateContext } from "../rpc/LockStateContext";
 import { LockState } from "@zmkfirmware/zmk-studio-ts-client/core";
 import { deserializeLayoutZoom, LayoutZoom } from "./PhysicalLayout";
 import { useLocalStorageState } from "../misc/useLocalStorageState";
+import { useSyncStep } from "../rpc/SyncStatusContext";
 import { useT } from "../i18n";
 
 type BehaviorMap = Record<number, GetBehaviorDetailsResponse>;
@@ -229,6 +232,12 @@ export default function Keyboard() {
   const t = useT();
   const conn = useContext(ConnectionContext);
   const undoRedo = useContext(UndoRedoContext);
+
+  // Reported to the header's initial-sync status line (rpc/SyncStatusContext).
+  // `keymap === undefined` is exactly useConnectedDeviceData's own "still
+  // loading" state (it resets to undefined on every new connection before the
+  // getKeymap response lands) — no separate loading flag needed.
+  useSyncStep(!!conn.conn && keymap === undefined, "keymap");
 
   useEffect(() => {
     setSelectedLayerIndex(0);
@@ -554,8 +563,16 @@ export default function Keyboard() {
   }
 
   return (
-    <div className="grid grid-cols-[auto_1fr] grid-rows-[1fr_minmax(10em,auto)] bg-base-300 max-w-full min-w-0 min-h-0">
-      <div className="p-2 flex flex-col gap-2 bg-base-200 row-span-2">
+    /*
+      Two columns on a desktop: pickers down the left, board on the right.
+      One column on a touch screen. The left column is sized `auto`, so with the
+      layer list laid out as a row of chips it grew to fit them and took the
+      width the board needed — the board ended up a thumbnail beside a very
+      large list. Stacking puts the pickers in a strip across the top and gives
+      the board the whole width below.
+    */
+    <div className="grid grid-cols-[auto_1fr] grid-rows-[1fr_minmax(10em,auto)] pointer-coarse:grid-cols-1 pointer-coarse:grid-rows-[auto_1fr] bg-base-300 max-w-full min-w-0 min-h-0">
+      <div className="p-2 flex flex-col gap-2 bg-base-200 row-span-2 pointer-coarse:row-span-1 pointer-coarse:col-start-1 pointer-coarse:row-start-1 pointer-coarse:flex-row pointer-coarse:flex-wrap pointer-coarse:items-start pointer-coarse:gap-x-4">
         {layouts && (
           <div className="col-start-3 row-start-1 row-end-2">
             <PhysicalLayoutPicker
@@ -583,7 +600,16 @@ export default function Keyboard() {
         )}
       </div>
       {layouts && keymap && behaviors && (
-        <div className="p-2 col-start-2 row-start-1 grid items-center justify-center relative min-w-0">
+        /*
+          min-h-0 is load-bearing. This cell sits in a `1fr` row, and a grid
+          item defaults to `min-height: auto` — it refuses to shrink below its
+          content. So the row grew to whatever the board wanted, the app's
+          outer `overflow-hidden` cut off the bottom, and auto-zoom kept
+          measuring the grown height and never scaled down: the board was
+          simply clipped. overflow-auto is the backstop for the case where it
+          still cannot fit.
+        */
+        <div className="p-2 col-start-2 row-start-1 pointer-coarse:col-start-1 pointer-coarse:row-start-2 grid items-center justify-center relative min-w-0 min-h-0 overflow-auto">
           <KeymapComp
             keymap={keymap}
             layout={layouts[selectedPhysicalLayoutIndex]}
@@ -614,7 +640,31 @@ export default function Keyboard() {
         </div>
       )}
       {keymap && selectedBinding && (
-        <div className="p-2 col-start-2 row-start-2 bg-base-200">
+        /*
+          A panel under the board on a desktop; a sheet over it on a touch
+          screen. Inline, the editor needs a permanent strip at the bottom —
+          and it is only useful while a key is selected, so on a phone that
+          strip spent most of its life empty while the board went without it.
+          As a fixed sheet it is out of flow entirely: the board gets the whole
+          screen, and the editor covers it only while it is being used.
+        */
+        <div className="p-2 col-start-2 row-start-2 bg-base-200 pointer-coarse:fixed pointer-coarse:inset-x-0 pointer-coarse:bottom-0 pointer-coarse:z-30 pointer-coarse:max-h-[60vh] pointer-coarse:overflow-y-auto pointer-coarse:rounded-t-xl pointer-coarse:shadow-[0_-6px_20px_rgba(0,0,0,0.35)]">
+          <button
+            type="button"
+            className="hidden pointer-coarse:flex float-right size-11 items-center justify-center rounded hover:bg-base-300"
+            aria-label={t("common.close")}
+            onClick={() => setSelectedKeyPosition(undefined)}
+          >
+            <X className="size-5" />
+          </button>
+          {Object.keys(behaviors).length === 0 && (
+            // The picker renders an empty dropdown and no parameter fields when
+            // the behavior list never arrived, which reads as "the editor is
+            // broken" rather than "the keyboard has not answered yet".
+            <p className="text-sm text-base-content/70">
+              {t("behavior.unavailable")}
+            </p>
+          )}
           <BehaviorBindingPicker
             binding={selectedBinding}
             behaviors={Object.values(behaviors)}

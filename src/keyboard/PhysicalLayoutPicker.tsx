@@ -44,7 +44,7 @@ export const PhysicalLayoutPicker = ({
   return (
     <Select
       onSelectionChange={selectionChanged}
-      className="flex flex-col"
+      className="flex flex-col pointer-coarse:shrink-0"
       selectedKey={layouts[selectedPhysicalLayoutIndex].name}
     >
       <Label className="after:content-[':'] text-sm">{t("layout.label")}</Label>

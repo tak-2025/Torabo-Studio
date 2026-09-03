@@ -36,6 +36,7 @@ import {
   LedCap,
   LiveFeedCap,
   MACRO_NAMES_WIRE_VER,
+  ModuleKind,
   ReservedLayersCap,
   TimingCap,
   TrackballCap,
@@ -43,9 +44,10 @@ import {
   TunnelCap,
 } from "./toraboCaps";
 
-/** An id past every one caps.h defines today — stands in for "a feature added
- * after this app was built". */
-const UNKNOWN_ID = 0x0b;
+/** An id past every one caps.h defines today (Feature.Modules = 11 is the
+ * highest known id) — stands in for "a feature added after this app was
+ * built". */
+const UNKNOWN_ID = 0x0d;
 
 function feat(id: number, wireVer: number, caps = 0): FeatureInfo {
   return { id: id as Feature, wireVer, caps };
@@ -85,7 +87,7 @@ describe("featureName", () => {
   it("shows an id from newer firmware as its number rather than hiding it", () => {
     expect(featureName(UNKNOWN_ID)).toEqual({
       key: "fw.feat.unknown",
-      vars: { id: "0x0B" },
+      vars: { id: "0x0D" },
     });
   });
 });
@@ -255,6 +257,75 @@ describe("decodeFeatureCaps", () => {
     const { badges, unknown } = decodeFeatureCaps(Feature.ReservedLayers, above);
     expect(badges).toEqual([]);
     expect(unknown).toBe(0x0100);
+  });
+});
+
+/**
+ * The one-day-lived phase9 per-feature scheme (2026-09-03's
+ * TrackballCap.BallLeft/BallRight, EncoderCap.LeftStd/LeftExt/RightStd/
+ * RightExt) was abolished the next day (2026-09-04) in favour of the unified
+ * Feature.Modules row below. Trackball and Encoder are back to exactly their
+ * pre-phase9 shapes: Trackball is Coast-only, Encoder has no named bits at
+ * all.
+ */
+describe("decodeFeatureCaps: Trackball/Encoder are back to pre-phase9 shape", () => {
+  it("trackball 0x0005 decodes as Coast, with the old BallRight bit now unknown", () => {
+    const { badges, unknown } = decodeFeatureCaps(Feature.Trackball, 0x0005);
+    expect(badges).toEqual([{ key: "fw.bit.coast" }]);
+    expect(unknown).toBe(0x0004);
+  });
+
+  it("encoder has no named bits — every bit comes back as unknown hex", () => {
+    const { badges, unknown } = decodeFeatureCaps(Feature.Encoder, 0x0005);
+    expect(badges).toEqual([]);
+    expect(unknown).toBe(0x0005);
+  });
+});
+
+/**
+ * Feature.Modules (id 11, TORABO_FEAT_MODULES, redesigned 2026-09-04): one
+ * caps u16, four 4-bit slots (bits0-3/4-7/8-11/12-15 = left standard/left
+ * extension/right standard/right extension), each independently
+ * 0=undeclared/1=pad/2=ball/3=encoder/4=none. Golden word 0x1213 is the real
+ * descriptor observed on hardware: encoder/pad/ball/pad.
+ */
+describe("decodeFeatureCaps: Feature.Modules", () => {
+  it("golden: 0x1213 decodes to one badge per slot, no unknown leftover", () => {
+    const { badges, unknown } = decodeFeatureCaps(Feature.Modules, 0x1213);
+    expect(badges).toEqual([
+      { key: "fw.mod.slot.leftStd.encoder" },
+      { key: "fw.mod.slot.leftExt.pad" },
+      { key: "fw.mod.slot.rightStd.ball" },
+      { key: "fw.mod.slot.rightExt.pad" },
+    ]);
+    expect(unknown).toBe(0);
+  });
+
+  it("omits an Undeclared (0) slot entirely — no dash, no badge", () => {
+    // Only leftStd declared (Ball=2); the other three nibbles are 0.
+    const { badges } = decodeFeatureCaps(Feature.Modules, 0x0002);
+    expect(badges).toEqual([{ key: "fw.mod.slot.leftStd.ball" }]);
+  });
+
+  it("decodes an explicit None (4) slot as its own badge", () => {
+    const { badges, unknown } = decodeFeatureCaps(Feature.Modules, ModuleKind.None << 12);
+    expect(badges).toEqual([{ key: "fw.mod.slot.rightExt.none" }]);
+    expect(unknown).toBe(0);
+  });
+
+  it("caps 0x0000 decodes to no badges and no unknown leftover", () => {
+    expect(decodeFeatureCaps(Feature.Modules, 0x0000)).toEqual({
+      badges: [],
+      unknown: 0,
+    });
+  });
+
+  it("leaves a nibble value this app has no name for (5-15) as unknown, shifted back", () => {
+    // 5 is one past None(4) — nothing between it and the nibble's ceiling of
+    // 15 is defined by ModuleKind.
+    const { badges, unknown } = decodeFeatureCaps(Feature.Modules, 5 << 8); // rightStd = 5
+    expect(badges).toEqual([]);
+    expect(unknown).toBe(5 << 8);
   });
 });
 

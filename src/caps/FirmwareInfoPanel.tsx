@@ -264,9 +264,11 @@ function LayoutCellBox({
         <span className="text-base-content/40">—</span>
       ) : (
         cell.items.map((item, i) =>
-          // A module the firmware placed itself and one this app worked out are
-          // not the same claim, so they do not get the same badge: solid for
-          // reported, dashed outline and a "(推定)" suffix for deduced.
+          // Three different claims get three different badges: solid for a
+          // report (the firmware placed it, or Feature.Modules declared it),
+          // dashed outline with a "(推定)" suffix for something this app
+          // worked out, and a subdued marker for a slot the firmware declared
+          // explicitly EMPTY — a positive statement, but not a module.
           item.inferred ? (
             <span
               key={i}
@@ -274,6 +276,13 @@ function LayoutCellBox({
               title={t("fw.mod.inferredHint")}
             >
               {t("fw.mod.inferredLabel", { item: t(item.key, item.vars) })}
+            </span>
+          ) : item.empty ? (
+            <span
+              key={i}
+              className="badge badge-ghost badge-sm text-base-content/50"
+            >
+              {t(item.key, item.vars)}
             </span>
           ) : (
             <span key={i} className="badge badge-primary badge-sm">

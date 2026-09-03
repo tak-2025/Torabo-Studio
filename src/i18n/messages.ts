@@ -47,6 +47,17 @@ const ja: Dict = {
     "・PC の Bluetooth を切る（USB が唯一の出力先になり、そのまま繋がります）\n" +
     "・またはキーマップに割り当てた &out（Output Selection）キーで USB に切り替える\n\n" +
     "この設定はキーボード側に保存され、キーマップを変えても残ります。",
+  // Android (Capacitor) build only — shown when the Bluetooth transport failed
+  // to register, which in practice means permissions were denied. Unused on
+  // this build (src/platform/transports.tsx never references these keys
+  // here); kept in sync so the translator's Android override can rely on them
+  // existing in both languages.
+  "connect.nativeUnavailable":
+    "利用できる接続方法がありません。Bluetooth 接続の準備ができていないようです。",
+  "connect.nativeCheckPermission":
+    "端末の設定 → アプリ → Torabo Studio → 権限 で「付近のデバイス」を許可してください。",
+  "connect.nativeCheckBluetooth":
+    "Bluetooth を ON にしてから、アプリを再起動してください。",
   "lang.label": "言語",
   "keylayout.label": "表示用のキー配列",
   "keylayout.desc":
@@ -167,6 +178,14 @@ const ja: Dict = {
   "status.error": "エラー: ",
   "status.notConnected": "先にキーボードを Bluetooth でつないでください。",
 
+  // Initial-sync status line (SyncStatusContext / AppHeader) — the handful of
+  // reads that run automatically right after connecting, before the keymap
+  // board and the tabs' capability gating have settled. Order matches
+  // syncStatus.ts's SYNC_STEP_ORDER.
+  "sync.step.keymap": "キーマップを読み込み中…",
+  "sync.step.caps": "機能一覧を確認中…",
+  "sync.step.macroNames": "マクロ名を読み込み中…",
+
   // Pre-connect guidance (shown when no keyboard is connected)
   "preconnect.howto":
     "表示された接続ウィンドウで USB か Bluetooth を選んでキーボードにつなぐと、この画面で設定を編集できます。",
@@ -220,6 +239,13 @@ const ja: Dict = {
   "trackpad.writeScope":
     "デバイスは上のプルダウンで切り替えます。書き込みは全デバイスまとめて保存されます。",
 
+  // Touch builds only (see misc/useUiScale.ts): the header's text-size cycle
+  // button, and the label shown when the behavior list has not arrived yet
+  // (src/keyboard/Keyboard.tsx's fixed key-editor sheet).
+  "uiscale.label": "文字サイズ",
+  "behavior.unavailable":
+    "キーボードから動作の一覧を取得できていません。切断して、つなぎ直してください。",
+
   // Post-connect empty states (before the first Read)
   "empty.read": "まず青い「① 読み込む」を押すと、現在の設定が表示されます。",
   "empty.macros":
@@ -253,6 +279,12 @@ const en: Dict = {
     "- Turn off Bluetooth on this PC (USB then becomes the only endpoint)\n" +
     "- Or switch the output to USB with an &out (Output Selection) key\n\n" +
     "This setting is stored on the keyboard and survives keymap changes.",
+  "connect.nativeUnavailable":
+    "No connection method is available. Bluetooth does not appear to be ready.",
+  "connect.nativeCheckPermission":
+    "Grant the \"Nearby devices\" permission under Settings > Apps > Torabo Studio > Permissions.",
+  "connect.nativeCheckBluetooth":
+    "Turn Bluetooth on, then restart the app.",
   "lang.label": "Language",
   "keylayout.label": "Legend layout",
   "keylayout.desc":
@@ -361,6 +393,11 @@ const en: Dict = {
   "status.error": "Error: ",
   "status.notConnected": "Connect a keyboard over Bluetooth first.",
 
+  // Initial-sync status line — see the ja block's comment above.
+  "sync.step.keymap": "Loading the keymap…",
+  "sync.step.caps": "Checking the feature list…",
+  "sync.step.macroNames": "Loading macro names…",
+
   "preconnect.howto":
     "Pick USB or Bluetooth in the connection window to link your keyboard, then you can edit here.",
   "preconnect.keymap":
@@ -408,6 +445,10 @@ const en: Dict = {
   // config into one blob and writes it all at once, so the copy now matches.
   "trackpad.writeScope":
     "Switch devices with the dropdown above. A write saves every device together.",
+
+  "uiscale.label": "Text size",
+  "behavior.unavailable":
+    "The list of behaviors has not arrived from the keyboard. Disconnect and connect again.",
 
   "empty.read": 'Press the blue "① Read" button to load the current settings.',
   "empty.macros": 'Press the blue "Read" button to load your saved macros.',

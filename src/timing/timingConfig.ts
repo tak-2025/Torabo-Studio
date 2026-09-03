@@ -35,6 +35,12 @@ export const TMG_WIRE_LEN = 96;
 export const TMG_VERSION = 1;
 export const TMG_HT_NODE_COUNT = 2;
 export const TMG_HT_POS_SLOTS = 32;
+/**
+ * Every wire length this codec's decoder accepts — currently a single fixed
+ * version, so a one-entry list. When this codec learns a new wire version,
+ * add its length here — the transport gate reads this list.
+ */
+export const TMG_WIRE_LENS = [TMG_WIRE_LEN] as const;
 
 const W_VERSION = 0;
 const W_HT_NODE_COUNT = 1;

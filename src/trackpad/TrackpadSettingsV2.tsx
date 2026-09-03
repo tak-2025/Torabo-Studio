@@ -456,7 +456,9 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
           </div>
 
           <details className="rounded-md border border-base-300 bg-base-200/60 px-4 py-3 text-sm leading-relaxed self-start max-w-3xl">
-            <summary className="cursor-pointer font-bold text-base select-none">
+            {/* Padding, not a height: a `<summary>` has to keep its default
+                display or it loses its disclosure triangle. */}
+            <summary className="cursor-pointer font-bold text-base select-none pointer-coarse:py-2.5">
               {t("help.termsSummary")}
             </summary>
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 mt-2">
@@ -510,7 +512,7 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
           <div className="flex flex-col gap-1">
             <button
               type="button"
-              className="flex items-center gap-1.5 text-left self-start"
+              className="flex items-center gap-1.5 text-left self-start pointer-coarse:min-h-11"
               aria-expanded={swipeOpen}
               onClick={() => setSwipeOpen((o) => !o)}
             >
@@ -533,14 +535,14 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
               <div className="flex flex-wrap gap-2 pl-6">
                 <button
                   type="button"
-                  className="btn btn-xs btn-ghost"
+                  className="btn btn-xs btn-ghost pointer-coarse:min-h-11 pointer-coarse:px-4 pointer-coarse:text-sm"
                   onClick={() => setCollapsedSwipeLayers(new Set())}
                 >
                   {t("tp.expandAll")}
                 </button>
                 <button
                   type="button"
-                  className="btn btn-xs btn-ghost"
+                  className="btn btn-xs btn-ghost pointer-coarse:min-h-11 pointer-coarse:px-4 pointer-coarse:text-sm"
                   onClick={() =>
                     setCollapsedSwipeLayers(
                       new Set(
@@ -619,7 +621,7 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
                             <td className="align-middle border-r border-base-200">
                               <button
                                 type="button"
-                                className="flex items-start gap-1 text-left"
+                                className="flex items-start gap-1 text-left pointer-coarse:min-h-11 pointer-coarse:items-center"
                                 aria-label={t("tp.aria.expandLayer", { n: i })}
                                 onClick={() => toggleSwipeLayer(i)}
                               >
@@ -809,10 +811,12 @@ function AxisRow({
           className="align-middle border-r border-base-200"
         >
           <div className="flex items-start gap-1">
+            {/* A bare 16px chevron. On a coarse pointer the button (not the
+                glyph) becomes the 44px square tap target. */}
             {onToggleCollapse && (
               <button
                 type="button"
-                className="shrink-0 mt-0.5"
+                className="shrink-0 mt-0.5 pointer-coarse:mt-0 pointer-coarse:size-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
                 aria-label={t("tp.aria.collapseLayer", { n: layerCell })}
                 onClick={onToggleCollapse}
               >
@@ -833,7 +837,7 @@ function AxisRow({
       <td className="font-medium whitespace-nowrap">{t(meta.rowLabelKey)}</td>
       <td>
         <select
-          className="select select-bordered select-sm"
+          className="select select-bordered select-sm pointer-coarse:min-h-11 pointer-coarse:leading-[2.75rem]"
           aria-label={`${axisLabel} axis function`}
           value={funcValue}
           onChange={(e) => onFuncChange(e.target.value)}
@@ -846,10 +850,14 @@ function AxisRow({
         </select>
       </td>
       <td>
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex items-center gap-2 text-sm pointer-coarse:min-h-11">
+          {/* The <label> already gives the row a 44px tap target; the box only
+              grows so there is something to aim at. It needs the important
+              modifier because daisyUI sizes checkboxes with
+              `[type=checkbox].checkbox-sm`, which outranks a utility. */}
           <input
             type="checkbox"
-            className="checkbox checkbox-sm"
+            className="checkbox checkbox-sm pointer-coarse:!size-6"
             checked={axis.reverse}
             onChange={(e) => onChange({ reverse: e.target.checked })}
           />
@@ -933,10 +941,10 @@ function CoastCard({
     <section className="rounded-md border border-base-300 bg-base-200/40 p-4 self-stretch flex flex-col gap-3">
       <h3 className="text-base font-bold">{t("coast.title")}</h3>
       <p className="text-sm text-base-content/70">{t("coast.desc")}</p>
-      <label className="flex items-center gap-2 text-sm">
+      <label className="flex items-center gap-2 text-sm pointer-coarse:min-h-11">
         <input
           type="checkbox"
-          className="checkbox checkbox-sm"
+          className="checkbox checkbox-sm pointer-coarse:!size-6"
           aria-label="coast enable"
           checked={coast.enable}
           onChange={(e) => onChange({ enable: e.target.checked })}
@@ -980,6 +988,32 @@ function CoastCard({
   );
 }
 
+/**
+ * Touch adaptation (PLAN.md stage 4). Same pair as the timing panel's slider —
+ * see src/timing/TimingPanel.tsx for the full rationale. In short: COARSE_RANGE
+ * turns the range input into a 44px-tall press strip with a fingertip-sized
+ * thumb, and STEP_BTN adds ±1 buttons that are `display: none` on a fine
+ * pointer, so the desktop build keeps its exact geometry. The buttons follow
+ * the range input because `Field`'s `<label>` binds to its first labelable
+ * descendant and `<button>` is labelable.
+ */
+const COARSE_RANGE =
+  "pointer-coarse:h-11 pointer-coarse:w-56 " +
+  "pointer-coarse:[&::-webkit-slider-runnable-track]:h-2 " +
+  "pointer-coarse:[&::-moz-range-track]:h-2 " +
+  "pointer-coarse:[&::-webkit-slider-thumb]:size-8 " +
+  "pointer-coarse:[&::-webkit-slider-thumb]:[--filler-offset:1rem] " +
+  "pointer-coarse:[&::-moz-range-thumb]:size-8 " +
+  "pointer-coarse:[&::-moz-range-thumb]:[--filler-offset:1rem]";
+
+const STEP_BTN =
+  "hidden pointer-coarse:inline-flex pointer-coarse:size-11 " +
+  "pointer-coarse:shrink-0 pointer-coarse:items-center " +
+  "pointer-coarse:justify-center pointer-coarse:rounded-md " +
+  "pointer-coarse:border pointer-coarse:border-base-300 " +
+  "pointer-coarse:bg-base-200 pointer-coarse:text-lg " +
+  "pointer-coarse:leading-none pointer-coarse:disabled:opacity-40";
+
 /** A labelled range slider with a live numeric readout. Mirrors the timing
  * panel's control so every slider in the app reads the same. */
 function SliderField({
@@ -999,24 +1033,45 @@ function SliderField({
   disabled?: boolean;
   onChange: (v: number) => void;
 }) {
+  const clamped = Math.min(max, Math.max(min, value));
+  const nudge = (dir: number) =>
+    onChange(Math.min(max, Math.max(min, clamped + dir)));
   return (
     <Field label={label}>
       <div className="flex items-center gap-2">
         <input
           type="range"
-          className="range range-sm w-48"
+          className={"range range-sm w-48 " + COARSE_RANGE}
           aria-label={label}
           min={min}
           max={max}
           step={1}
-          value={Math.min(max, Math.max(min, value))}
+          value={clamped}
           disabled={disabled}
           onChange={(e) => onChange(Number(e.target.value))}
         />
+        <button
+          type="button"
+          className={STEP_BTN}
+          aria-label={`${label} −1`}
+          disabled={disabled || clamped <= min}
+          onClick={() => nudge(-1)}
+        >
+          −
+        </button>
         <span className="font-mono text-sm w-20 text-right tabular-nums">
           {value}
           {unit && ` ${unit}`}
         </span>
+        <button
+          type="button"
+          className={STEP_BTN}
+          aria-label={`${label} +1`}
+          disabled={disabled || clamped >= max}
+          onClick={() => nudge(1)}
+        >
+          +
+        </button>
       </div>
     </Field>
   );
@@ -1049,7 +1104,7 @@ function GesturesCard({
       <div>
         <button
           type="button"
-          className="flex items-center gap-1.5 text-left w-full"
+          className="flex items-center gap-1.5 text-left w-full pointer-coarse:min-h-11"
           aria-expanded={open}
           onClick={onToggleOpen}
         >
@@ -1080,7 +1135,7 @@ function GesturesCard({
                 className="rounded-md border border-base-300 bg-base-100 p-3"
               >
                 <summary
-                  className="font-bold text-sm cursor-pointer select-none"
+                  className="font-bold text-sm cursor-pointer select-none pointer-coarse:py-3"
                   title={t("tp.th.layerTitle")}
                 >
                   {t("tp.gest.layer", { n: i })}
@@ -1162,7 +1217,7 @@ function BindingEditor({
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-sm font-semibold w-40 shrink-0">{label}</span>
         <select
-          className="select select-bordered select-sm"
+          className="select select-bordered select-sm pointer-coarse:min-h-11 pointer-coarse:leading-[2.75rem]"
           aria-label={`${label} behavior`}
           value={b.behavior}
           onChange={(e) => setBehavior(Number(e.target.value) as TpBehavior)}
@@ -1174,16 +1229,13 @@ function BindingEditor({
           ))}
         </select>
         {isLayer && (
-          <label className="flex items-center gap-2 text-sm">
-            <span
-              className="text-base-content/70"
-              title={t("tp.th.layerTitle")}
-            >
+          <label className="flex items-center gap-2 text-sm pointer-coarse:min-h-11">
+            <span className="text-base-content/70" title={t("tp.th.layerTitle")}>
               {t("tp.th.layer")}
             </span>
             {layerNames ? (
               <select
-                className="select select-bordered select-sm"
+                className="select select-bordered select-sm pointer-coarse:min-h-11 pointer-coarse:leading-[2.75rem]"
                 aria-label={`${label} layer`}
                 value={b.param}
                 onChange={(e) => onChange({ param: Number(e.target.value) })}
@@ -1262,7 +1314,7 @@ function CpPicker({
   return (
     <div className="flex flex-col gap-2">
       <select
-        className="select select-bordered select-sm"
+        className="select select-bordered select-sm pointer-coarse:min-h-11 pointer-coarse:leading-[2.75rem]"
         aria-label="media key"
         value={selectValue}
         onChange={(e) => {
@@ -1327,7 +1379,9 @@ function NumIn({
   return (
     <input
       type="number"
-      className="input input-bordered input-sm w-24"
+      // `min-height` beats daisyUI's `height: 2rem`; the matching `line-height`
+      // keeps the value vertically centred the way daisyUI's size classes do.
+      className="input input-bordered input-sm w-24 pointer-coarse:min-h-11 pointer-coarse:leading-[2.75rem]"
       aria-label={label}
       title={label}
       min={min}

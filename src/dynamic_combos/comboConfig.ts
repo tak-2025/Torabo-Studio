@@ -29,6 +29,15 @@ const WIRE_SLOT = 26;
 const READ_HDR = 4;
 const WRITE_HDR = 2;
 
+/** Bytes a full READ returns: header + slot_count * 26-byte slots. = 4 + 16 * 26 = 420 B. */
+export const CB_WIRE_LEN = READ_HDR + CB_SLOTS * WIRE_SLOT;
+/**
+ * Every wire length this codec's decoder accepts — currently a single fixed
+ * version, so a one-entry list. When this codec learns a new wire version,
+ * add its length here — the transport gate reads this list.
+ */
+export const CB_WIRE_LENS = [CB_WIRE_LEN] as const;
+
 export const CB_FLAG_SLOW_RELEASE = 0x01;
 
 export enum ComboTarget {

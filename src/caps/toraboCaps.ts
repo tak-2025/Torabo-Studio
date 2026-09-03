@@ -30,7 +30,7 @@
  * blob budget in the header — see tpConfigV2.ts's TP_FW_BLOB_MAX) will be
  * written against; today's firmware is
  * torabo-tsuki_ext_FW/caps/include/zmk_torabo_caps/caps.h (desc_ver 1,
- * TORABO_CAPS_MAX_FEATURES 10) and .../caps/src/caps.c.
+ * TORABO_CAPS_MAX_FEATURES 11) and .../caps/src/caps.c.
  *
  * What this app promises, for every desc_ver it does not recognise:
  *   1. It parses by `feature_count`, never by total length. Any count is
@@ -100,11 +100,52 @@ export const Feature = {
    * either — presence just means "USB can reach the features above". */
   RpcTunnel: 9,
   Timing: 10,
+  /**
+   * TORABO_FEAT_MODULES (caps.h, wire_ver 1, redesigned 2026-09-04 — replaces
+   * the abolished TrackballCap.BallLeft/BallRight and EncoderCap.*
+   * LeftStd/LeftExt/RightStd/RightExt bits). One caps u16, four 4-bit slots:
+   * bits0-3 = left standard, bits4-7 = left extension, bits8-11 = right
+   * standard, bits12-15 = right extension. See ModuleKind for what a slot's
+   * nibble means, and moduleSlots() for the decode. No config wire of its
+   * own — same "entry exists only to keep APP_MAX_WIRE_VER total" reasoning
+   * as ReservedLayers/LiveFeed below.
+   */
+  Modules: 11,
 } as const;
 export type Feature = (typeof Feature)[keyof typeof Feature];
 
 /** Per-feature capability bits. Meaning is feature-specific. */
 export const LedCap = { Left: 0x0001, Right: 0x0002, CentralIsLeft: 0x0004 } as const;
+
+/**
+ * "Which physical half" — mirrors `enum torabo_caps_side` in caps.h
+ * (TORABO_CAPS_SIDE_UNKNOWN/_LEFT/_RIGHT, caps.h:72). Used by the header
+ * `_rsv` byte below to say which half is the split CENTRAL — a genuine 1-of-3
+ * choice, unlike Feature.Modules' four slot nibbles, which each independently
+ * name what is on that connector (a board can have a ball on one standard
+ * module and an encoder on the other, or nothing declared at all —
+ * redesigned 2026-09-04, superseding the earlier per-feature
+ * TrackballCap/EncoderCap side-bit scheme).
+ */
+export const CapsSide = { Unknown: 0, Left: 1, Right: 2 } as const;
+export type CapsSide = (typeof CapsSide)[keyof typeof CapsSide];
+
+/**
+ * Header `_rsv` byte, bit0-1: which half the firmware says is CENTRAL
+ * (caps.h:150-151, TORABO_CAPS_HDR_CENTRAL_SHIFT 0 / _MASK 0x03). Set from
+ * CONFIG_TORABO_CENTRAL_SIDE (caps.c:167-174); an unset conf reports 0 =
+ * CapsSide.Unknown, same as every pre-phase-9 firmware, so this is
+ * byte-identical until a builder opts in.
+ *
+ * This is exactly the FORWARD COMPATIBILITY contract's rule (c) in practice —
+ * new header-level information goes in the reserved byte, which old parsers
+ * already skip harmlessly (see the contract at the top of this file). It is
+ * not a *future* desc_ver change: today's desc_ver 1 firmware already sends
+ * it, and decodeCaps below already reads `_rsv` for exactly the reason rule
+ * (c) says it may.
+ */
+export const CAPS_HDR_CENTRAL_SHIFT = 0;
+export const CAPS_HDR_CENTRAL_MASK = 0x03;
 
 /** Timing: SplitDebounce = the debounce windows are carried across the split link,
  * so they apply to BOTH halves' key scanning. Without it they only reach the
@@ -122,8 +163,23 @@ export const TimingCap = { SplitDebounce: 0x0001 } as const;
  * because the wire itself already says how many device blocks it holds. */
 export const TrackpadCap = { DeviceMask: 0x000f, Coast: 0x0010 } as const;
 
-/** Trackball: Coast = inertial scroll for the ball (the v3 wire trailer). */
+/**
+ * Trackball: Coast = inertial scroll for the ball (the v3 wire trailer,
+ * caps.h:91). caps.h's per-side BallLeft/BallRight bits (bit1/bit2) that
+ * briefly lived here (PLAN-ext-fw-refactor.md フェーズ9, 2026-09-03) were
+ * abolished the following day in favour of the unified Feature.Modules
+ * declaration below — this feature's caps word is Coast-only again, same as
+ * every pre-phase9 build.
+ */
 export const TrackballCap = { Coast: 0x0001 } as const;
+
+/**
+ * Encoder: no caps bits of its own. The per-slot EncoderCap.LeftStd/LeftExt/
+ * RightStd/RightExt flags (PLAN-ext-fw-refactor.md フェーズ9, 2026-09-03)
+ * were abolished the following day: which slot(s) carry an encoder is now
+ * declared once, for every module kind, by Feature.Modules below — this
+ * feature reports caps 0, same as every pre-phase9 build.
+ */
 
 /** Reserved layers: the whole low byte is a COUNT, not a bit field — how many
  * layers the build reserved (TORABO_CAPS_LAYERS_MASK). Same reason as
@@ -208,11 +264,27 @@ export const APP_MAX_WIRE_VER: Record<Feature, number> = {
   [Feature.RpcTunnel]: 1,
   /** src/timing/timingConfig.ts — decodeTiming takes v1 only (TMG_VERSION). */
   [Feature.Timing]: 1,
+  /**
+   * No config wire of its own: TORABO_FEAT_MODULES packs its answer entirely
+   * into the caps u16 (moduleSlots() below), nothing to read or write back.
+   * Entry exists only to keep this table total over Feature; the value is the
+   * wire_ver caps.c reports (1).
+   */
+  [Feature.Modules]: 1,
 };
 
 export interface ToraboCaps {
   descVersion: number;
   fw: { major: number; minor: number; patch: number };
+  /**
+   * Which half the header's `_rsv` byte says is CENTRAL (CAPS_HDR_CENTRAL_MASK
+   * above). Optional so every existing hand-built ToraboCaps literal in this
+   * codebase (tests, stories) keeps compiling unchanged — decodeCaps always
+   * sets it; centralSideFromHeader() below treats a missing value the same as
+   * CapsSide.Unknown, which is what firmware built before this field existed,
+   * and every one of those literals, effectively reports anyway.
+   */
+  hdrCentralSide?: CapsSide;
   features: FeatureInfo[];
 }
 
@@ -245,6 +317,14 @@ export function decodeCaps(buf: Uint8Array): ToraboCaps {
   const descVersion = dv.getUint8(2);
   const fw = { major: dv.getUint8(3), minor: dv.getUint8(4), patch: dv.getUint8(5) };
   /**
+   * `_rsv` (byte 7), bit0-1 = which half is CENTRAL. Reading it here — rather
+   * than leaving it as a skipped byte — is exactly what the FORWARD
+   * COMPATIBILITY contract's rule (c) above exists to allow: new header-level
+   * information may live in the reserved byte, and an app that predates this
+   * field would simply never look at it, which is the whole point of the rule.
+   */
+  const hdrCentralSide = (dv.getUint8(7) & CAPS_HDR_CENTRAL_MASK) as CapsSide;
+  /**
    * The count, not the length, decides how many entries there are. A firmware
    * that raises TORABO_CAPS_MAX_FEATURES (10 today) therefore needs no change
    * here. The only thing checked is that the bytes are actually present: u8
@@ -274,7 +354,7 @@ export function decodeCaps(buf: Uint8Array): ToraboCaps {
   }
   // `buf` may run on past `o` — a longer header's worth of new fields parked
   // after the table (contract rule c), or padding. Ignored by design.
-  return { descVersion, fw, features };
+  return { descVersion, fw, hdrCentralSide, features };
 }
 
 /* --------------------------------------------------------------------------
@@ -406,5 +486,84 @@ export function ledSides(caps: ToraboCaps | null): { left: boolean; right: boole
   return {
     left: (f.caps & LedCap.Left) !== 0,
     right: (f.caps & LedCap.Right) !== 0,
+  };
+}
+
+/**
+ * Which half the firmware's header says is CENTRAL, straight from `_rsv`
+ * (CapsSide.Unknown for pre-phase-9 firmware, a missing field, or no
+ * descriptor at all). moduleLayout.ts prefers this over the older
+ * LedCap.CentralIsLeft inference — see its own comment for why that fallback
+ * still matters (an LED-less build reports no LED entry at all, so this is
+ * the only source once caps.h's phase-9 bits are absent too).
+ */
+export function centralSideFromHeader(caps: ToraboCaps | null): CapsSide {
+  return caps?.hdrCentralSide ?? CapsSide.Unknown;
+}
+
+/**
+ * A module slot's declared kind — Feature.Modules' caps word is four of these
+ * nibbles packed together (bits0-3/4-7/8-11/12-15). The three non-zero,
+ * non-"none" values are numbered exactly like the trackpad wire's own
+ * per-device meta byte (TpKind in trackpad/tpConfigV2.ts, TP_META_KIND_* in
+ * config.h) — both this feature and that wire can report the same physical
+ * pad, so sharing the numbering is what lets moduleLayout.ts dedupe them by
+ * value instead of by a translation table.
+ *
+ * Firmware names (caps.h `enum torabo_caps_slot`): TORABO_CAPS_SLOT_UNDECLARED
+ * =0, _PAD=1, _BALL=2, _ENCODER=3, _NONE=4. Values cross-checked with the
+ * firmware side on 2026-09-04.
+ */
+export const ModuleKind = {
+  /** Slot's nibble is 0: nothing said about this connector. Not the same as
+   * None — this is silence, None is a positive statement. */
+  Undeclared: 0,
+  Pad: 1,
+  Ball: 2,
+  Encoder: 3,
+  /** The connector is populated with nothing — an explicit, positive "empty",
+   * distinct from Undeclared's silence. */
+  None: 4,
+} as const;
+export type ModuleKind = (typeof ModuleKind)[keyof typeof ModuleKind];
+
+/** One decoded nibble per connector, in the fixed cell order this app always
+ * lays the grid out in (moduleLayout.ts's CELLS). */
+export interface ModuleSlots {
+  leftStd: ModuleKind;
+  leftExt: ModuleKind;
+  rightStd: ModuleKind;
+  rightExt: ModuleKind;
+}
+
+/**
+ * Decode Feature.Modules' caps word into its four slots, or null when the
+ * descriptor has no such row at all — older firmware, which never declared
+ * placement this way and falls back entirely to moduleLayout.ts's inference.
+ *
+ * Firmware layout constants (caps.h): TORABO_CAPS_MOD_SLOT_BITS 4 /
+ * TORABO_CAPS_MOD_SLOT_MASK 0xF / TORABO_CAPS_MOD_LEFT_STD_SHIFT 0 /
+ * _LEFT_EXT_SHIFT 4 / _RIGHT_STD_SHIFT 8 / _RIGHT_EXT_SHIFT 12. The values come
+ * from CONFIG_TORABO_SLOT_LEFT_STD / _LEFT_EXT / _RIGHT_STD / _RIGHT_EXT
+ * (int 0-4, default 0), which the firmware builder always emits. The shared
+ * golden — this user's hardware, 0x1213, row bytes [0x0B,0x01,0x13,0x12] — is
+ * pinned in toraboCaps.test.ts here and in test_caps_decl.c / test_caps.c on
+ * the firmware side.
+ *
+ * A present row with every nibble 0 (an unset CONFIG_TORABO_SLOT_* on
+ * firmware that DOES have the row) is NOT null: it decodes to four
+ * `Undeclared` slots, and the caller falls back to inference per slot, same
+ * end result as a missing row but distinguishable for anyone who needs to
+ * know whether the firmware could have declared placement at all.
+ */
+export function moduleSlots(caps: ToraboCaps | null): ModuleSlots | null {
+  const f = featureInfo(caps, Feature.Modules);
+  if (!f) return null;
+  const slot = (i: number) => ((f.caps >> (4 * i)) & 0xf) as ModuleKind;
+  return {
+    leftStd: slot(0),
+    leftExt: slot(1),
+    rightStd: slot(2),
+    rightExt: slot(3),
   };
 }

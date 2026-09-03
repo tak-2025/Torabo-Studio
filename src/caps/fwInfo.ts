@@ -33,6 +33,7 @@ import {
   LedCap,
   MACRO_NAMES_WIRE_VER,
   LiveFeedCap,
+  ModuleKind,
   ReservedLayersCap,
   TimingCap,
   TrackballCap,
@@ -75,6 +76,7 @@ const FEATURE_NAME_KEYS: Record<Feature, string> = {
   [Feature.LiveFeed]: "fw.feat.liveFeed",
   [Feature.RpcTunnel]: "fw.feat.rpcTunnel",
   [Feature.Timing]: "tab.timing",
+  [Feature.Modules]: "fw.feat.modules",
 };
 
 /**
@@ -84,15 +86,20 @@ const FEATURE_NAME_KEYS: Record<Feature, string> = {
  *
  * A fixed order means two keyboards' tables can be read side by side, and that
  * the same feature is in the same place every time you open the tab. It runs
- * from what the whole keyboard is (reserved layers) through the pointing
- * devices and the keys, to the two service-level entries that are infrastructure
- * rather than settings.
+ * from what the whole keyboard is (reserved layers, module layout) through the
+ * pointing devices and the keys, to the two service-level entries that are
+ * infrastructure rather than settings.
+ *
+ * Modules sits right after ReservedLayers on purpose: both describe the build
+ * rather than opening a screen of their own, so the two "what is this
+ * keyboard" configuration rows lead the table before the per-feature ones.
  *
  * Ids not listed here — a feature from newer firmware — come after, in the
  * order the descriptor sent them, since nothing better is known about them.
  */
 export const FEATURE_DISPLAY_ORDER: Feature[] = [
   Feature.ReservedLayers,
+  Feature.Modules,
   Feature.Trackball,
   Feature.Trackpad,
   Feature.Encoder,
@@ -160,13 +167,20 @@ interface CapsValue {
  * for all of it: TORABO_CAPS_* in
  * torabo-tsuki_ext_FW/caps/include/zmk_torabo_caps/caps.h.
  *
- * Partial on purpose: a feature with no entry (Macros, Combos, Encoder) reports
- * caps 0 today, and if a future firmware sets a bit there it falls through to
- * the unknown-bit hex, which is exactly what we want it to do.
+ * Partial on purpose: a feature with no entry (Macros, Combos) reports caps 0
+ * today, and if a future firmware sets a bit there it falls through to the
+ * unknown-bit hex, which is exactly what we want it to do.
  */
 const CAPS_BITS: Partial<Record<Feature, CapsBit[]>> = {
+  // The phase9 BallLeft/BallRight flags that briefly lived here (2026-09-03)
+  // were abolished the next day: Trackball's caps word is Coast-only again,
+  // same as every pre-phase9 build.
   [Feature.Trackball]: [{ mask: TrackballCap.Coast, key: "fw.bit.coast" }],
   [Feature.Trackpad]: [{ mask: TrackpadCap.Coast, key: "fw.bit.coast" }],
+  // Encoder has no CAPS_BITS entry, same as every pre-phase9 build: its own
+  // phase9 per-slot flags were abolished the next day in favour of
+  // Feature.Modules (decodeModulesCaps below), so a v1 wire's caps 0 reports
+  // nothing here to name.
   [Feature.Led]: [
     { mask: LedCap.Left, key: "fw.bit.ledLeft" },
     { mask: LedCap.Right, key: "fw.bit.ledRight" },
@@ -195,6 +209,59 @@ function fieldValue(caps: number, mask: number): number {
   return (caps & mask) / lowest;
 }
 
+/**
+ * Feature.Modules' four 4-bit slots, in the order toraboCaps.ts's
+ * moduleSlots() decodes them (left standard/extension, then right).
+ *
+ * Not expressible with CAPS_BITS/CAPS_VALUES above: those tables are either a
+ * single flag or a single number over the whole caps word, while this word is
+ * FOUR independent small enums. decodeFeatureCaps special-cases this id
+ * instead of trying to generalise the two shapes into one.
+ */
+const MODULE_SLOTS: { shift: number; slotKey: string }[] = [
+  { shift: 0, slotKey: "leftStd" },
+  { shift: 4, slotKey: "leftExt" },
+  { shift: 8, slotKey: "rightStd" },
+  { shift: 12, slotKey: "rightExt" },
+];
+
+/** ModuleKind -> the fragment of the badge key that names it. Undeclared (0)
+ * has no entry: that slot is simply omitted, not shown as anything. */
+const MODULE_KIND_KEYS: Partial<Record<ModuleKind, string>> = {
+  [ModuleKind.Pad]: "pad",
+  [ModuleKind.Ball]: "ball",
+  [ModuleKind.Encoder]: "encoder",
+  [ModuleKind.None]: "none",
+};
+
+/**
+ * Decode Feature.Modules' caps word: one badge per DECLARED slot (Undeclared
+ * slots are omitted — "left standard: —" would be noise, not information),
+ * fully baked as `fw.mod.slot.<slot>.<kind>` rather than composed from a
+ * template — the same "one key per bit" convention CAPS_BITS uses, so this
+ * table needs no runtime string-building.
+ *
+ * A nibble value this app has no name for (5-15 — nothing between None's 4
+ * and the nibble's ceiling of 15 is defined) is left in `unknown`, shifted
+ * back to its own position, same promise decodeFeatureCaps' generic path
+ * makes for a bit it does not recognise.
+ */
+function decodeModulesCaps(caps: number): CapsDecode {
+  const badges: Msg[] = [];
+  let unknown = 0;
+  for (const { shift, slotKey } of MODULE_SLOTS) {
+    const kind = ((caps >> shift) & 0xf) as ModuleKind;
+    if (kind === ModuleKind.Undeclared) continue;
+    const kindKey = MODULE_KIND_KEYS[kind];
+    if (kindKey) {
+      badges.push({ key: `fw.mod.slot.${slotKey}.${kindKey}` });
+    } else {
+      unknown |= kind << shift;
+    }
+  }
+  return { badges, unknown };
+}
+
 export interface CapsDecode {
   /** Named bits and value fields, in the order declared above. */
   badges: Msg[];
@@ -214,6 +281,8 @@ export interface CapsDecode {
  * answer.
  */
 export function decodeFeatureCaps(id: number, caps: number): CapsDecode {
+  if (id === Feature.Modules) return decodeModulesCaps(caps);
+
   const bits = CAPS_BITS[id as Feature] ?? [];
   const values = CAPS_VALUES[id as Feature] ?? [];
   const badges: Msg[] = [];

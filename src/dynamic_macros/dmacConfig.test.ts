@@ -21,6 +21,8 @@ import {
   DM_VERSION,
   DM_VERSION_V1,
   DM_VERSION_V2,
+  DM_WIRE_LEN_V1,
+  DM_WIRE_LEN_V2,
   DM_SLOTS,
   DM_STEPS,
   DmAction,
@@ -103,6 +105,15 @@ describe("dmacConfig wire constants", () => {
     expect(v1).toBe(1624);
     expect(v1 + DM_SLOTS * READ_NAME).toBe(1964);
     expect(1964).toBeLessThanOrEqual(2048);
+  });
+
+  it("exports DM_WIRE_LEN_V1/V2 matching the documented wire sizes", () => {
+    // Independent of the golden-bytes derivation above: these are the values
+    // other modules (uuids.ts's macros exactLength) import and rely on, so
+    // pin them to the literal numbers the docs commit to, not just to each
+    // other.
+    expect(DM_WIRE_LEN_V1).toBe(1624);
+    expect(DM_WIRE_LEN_V2).toBe(1964);
   });
 });
 

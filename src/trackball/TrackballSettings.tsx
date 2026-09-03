@@ -197,7 +197,9 @@ export function TrackballSettings({ caps }: { caps?: ToraboCaps | null }) {
           )}
 
           <details className="rounded-md border border-base-300 bg-base-200/60 px-4 py-3 text-sm leading-relaxed self-start max-w-2xl">
-            <summary className="cursor-pointer font-bold text-base select-none">
+            {/* Padding, not a height: a `<summary>` has to keep its default
+                display or it loses its disclosure triangle. */}
+            <summary className="cursor-pointer font-bold text-base select-none pointer-coarse:py-2.5">
               {t("help.termsSummary")}
             </summary>
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 mt-2">
@@ -274,7 +276,13 @@ export function TrackballSettings({ caps }: { caps?: ToraboCaps | null }) {
                         tempCell={
                           <input
                             type="checkbox"
-                            className="checkbox checkbox-sm"
+                            // Bare cell checkbox — no wrapping <label> to
+                            // carry the tap target, so the box itself has to
+                            // be 44px on a coarse pointer. Important modifier
+                            // because daisyUI sizes checkboxes with
+                            // `[type=checkbox].checkbox-sm`, whose specificity
+                            // a plain utility cannot beat.
+                            className="checkbox checkbox-sm pointer-coarse:!size-11"
                             aria-label={`layer ${i} temp-layer enable`}
                             checked={l.tempEnable}
                             onChange={(e) =>
@@ -329,10 +337,10 @@ function CoastCard({
     <section className="flex flex-col gap-3 rounded-md border border-base-300 bg-base-200/40 p-4 self-stretch">
       <h3 className="font-semibold text-base">{t("coast.title")}</h3>
       <p className="text-sm text-base-content/70">{t("coast.desc")}</p>
-      <label className="flex items-center gap-2 text-sm">
+      <label className="flex items-center gap-2 text-sm pointer-coarse:min-h-11">
         <input
           type="checkbox"
-          className="checkbox checkbox-sm"
+          className="checkbox checkbox-sm pointer-coarse:!size-6"
           aria-label="coast enable"
           checked={coast.enable}
           onChange={(e) => onChange({ enable: e.target.checked })}
@@ -374,6 +382,32 @@ function CoastCard({
   );
 }
 
+/**
+ * Touch adaptation (PLAN.md stage 4). Same pair as the timing panel's slider —
+ * see src/timing/TimingPanel.tsx for the full rationale. In short: COARSE_RANGE
+ * turns the range input into a 44px-tall press strip with a fingertip-sized
+ * thumb, and STEP_BTN adds ±1 buttons that are `display: none` on a fine
+ * pointer, so the desktop build keeps its exact geometry. The buttons follow
+ * the range input because `Field`'s `<label>` binds to its first labelable
+ * descendant and `<button>` is labelable.
+ */
+const COARSE_RANGE =
+  "pointer-coarse:h-11 pointer-coarse:w-56 " +
+  "pointer-coarse:[&::-webkit-slider-runnable-track]:h-2 " +
+  "pointer-coarse:[&::-moz-range-track]:h-2 " +
+  "pointer-coarse:[&::-webkit-slider-thumb]:size-8 " +
+  "pointer-coarse:[&::-webkit-slider-thumb]:[--filler-offset:1rem] " +
+  "pointer-coarse:[&::-moz-range-thumb]:size-8 " +
+  "pointer-coarse:[&::-moz-range-thumb]:[--filler-offset:1rem]";
+
+const STEP_BTN =
+  "hidden pointer-coarse:inline-flex pointer-coarse:size-11 " +
+  "pointer-coarse:shrink-0 pointer-coarse:items-center " +
+  "pointer-coarse:justify-center pointer-coarse:rounded-md " +
+  "pointer-coarse:border pointer-coarse:border-base-300 " +
+  "pointer-coarse:bg-base-200 pointer-coarse:text-lg " +
+  "pointer-coarse:leading-none pointer-coarse:disabled:opacity-40";
+
 /** A labelled range slider with a live numeric readout. Mirrors the timing
  * panel's control so every slider in the app reads the same. */
 function SliderField({
@@ -393,24 +427,45 @@ function SliderField({
   disabled?: boolean;
   onChange: (v: number) => void;
 }) {
+  const clamped = Math.min(max, Math.max(min, value));
+  const nudge = (dir: number) =>
+    onChange(Math.min(max, Math.max(min, clamped + dir)));
   return (
     <Field label={label}>
       <div className="flex items-center gap-2">
         <input
           type="range"
-          className="range range-sm w-48"
+          className={"range range-sm w-48 " + COARSE_RANGE}
           aria-label={label}
           min={min}
           max={max}
           step={1}
-          value={Math.min(max, Math.max(min, value))}
+          value={clamped}
           disabled={disabled}
           onChange={(e) => onChange(Number(e.target.value))}
         />
+        <button
+          type="button"
+          className={STEP_BTN}
+          aria-label={`${label} −1`}
+          disabled={disabled || clamped <= min}
+          onClick={() => nudge(-1)}
+        >
+          −
+        </button>
         <span className="font-mono text-sm w-20 text-right tabular-nums">
           {value}
           {unit && ` ${unit}`}
         </span>
+        <button
+          type="button"
+          className={STEP_BTN}
+          aria-label={`${label} +1`}
+          disabled={disabled || clamped >= max}
+          onClick={() => nudge(1)}
+        >
+          +
+        </button>
       </div>
     </Field>
   );
@@ -450,7 +505,7 @@ function AxisRow({
       <td className="font-medium">{axisLabel}</td>
       <td>
         <select
-          className="select select-bordered select-sm"
+          className="select select-bordered select-sm pointer-coarse:min-h-11 pointer-coarse:leading-[2.75rem]"
           aria-label={`${axisLabel} axis role`}
           value={axis.role}
           onChange={(e) => onChange({ role: Number(e.target.value) as Role })}
@@ -463,10 +518,10 @@ function AxisRow({
         </select>
       </td>
       <td>
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex items-center gap-2 text-sm pointer-coarse:min-h-11">
           <input
             type="checkbox"
-            className="checkbox checkbox-sm"
+            className="checkbox checkbox-sm pointer-coarse:!size-6"
             checked={axis.reverse}
             onChange={(e) => onChange({ reverse: e.target.checked })}
           />
@@ -508,9 +563,15 @@ function NumIn({
   return (
     <input
       type="number"
+      // `big` is already 48px tall; only the small variant needs the coarse
+      // bump. `min-height` beats daisyUI's `height: 2rem`, and the matching
+      // `line-height` keeps the value vertically centred the way daisyUI's own
+      // size classes do.
       className={
         "input input-bordered " +
-        (big ? "input-md w-32 text-base" : "input-sm w-24")
+        (big
+          ? "input-md w-32 text-base"
+          : "input-sm w-24 pointer-coarse:min-h-11 pointer-coarse:leading-[2.75rem]")
       }
       aria-label={label}
       title={label}

@@ -169,15 +169,17 @@ export const LayerPicker = ({
   );
 
   return (
-    <div className="flex flex-col min-w-40">
-      <div className="grid grid-cols-[1fr_auto_auto] items-center">
+    <div className="flex flex-col min-w-40 pointer-coarse:min-w-0 pointer-coarse:flex-row pointer-coarse:items-center pointer-coarse:gap-2">
+      {/* Label and +/- sit above the list on a desktop and beside it on a touch
+          screen, where a row of its own is a row the board does not get. */}
+      <div className="grid grid-cols-[1fr_auto_auto] items-center pointer-coarse:flex pointer-coarse:shrink-0">
         <Label className="after:content-[':'] text-sm">
           {t("layer.layers")}
         </Label>
         {onRemoveClicked && (
           <button
             type="button"
-            className="hover:text-primary-content hover:bg-primary rounded-sm"
+            className="hover:text-primary-content hover:bg-primary rounded-sm pointer-coarse:p-3.5"
             disabled={!canRemove}
             onClick={onRemoveClicked}
           >
@@ -188,7 +190,7 @@ export const LayerPicker = ({
           <button
             type="button"
             disabled={!canAdd}
-            className="hover:text-primary-content ml-1 hover:bg-primary rounded-sm disabled:text-gray-500 disabled:hover:bg-base-300 disabled:cursor-not-allowed"
+            className="hover:text-primary-content ml-1 hover:bg-primary rounded-sm disabled:text-gray-500 disabled:hover:bg-base-300 disabled:cursor-not-allowed pointer-coarse:p-3.5"
             onClick={onAddClicked}
           >
             <Plus className="size-4" />
@@ -213,7 +215,11 @@ export const LayerPicker = ({
             ? [layer_items[selectedLayerIndex].id]
             : []
         }
-        className="ml-2 items-center justify-center cursor-pointer"
+        // Down the side on a desktop; across the top on a touch screen. A phone
+        // in portrait has no vertical room to spare here, and the column pushed
+        // the lower layers off screen — the list was reachable only by
+        // scrolling the whole page away from the board you are editing.
+        className="ml-2 items-center justify-center cursor-pointer pointer-coarse:ml-0 pointer-coarse:flex pointer-coarse:flex-wrap pointer-coarse:gap-1"
         onSelectionChange={selectionChanged}
         dragAndDropHooks={dragAndDropHooks}
         {...props}
@@ -221,15 +227,47 @@ export const LayerPicker = ({
         {(layer_item) => (
           <ListBoxItem
             textValue={layer_item.name}
-            className="p-1 b-1 my-1 group grid grid-cols-[1fr_auto] items-center aria-selected:bg-primary aria-selected:text-primary-content border rounded border-transparent border-solid hover:bg-base-300"
+            className="p-1 b-1 my-1 group grid grid-cols-[1fr_auto] items-center aria-selected:bg-primary aria-selected:text-primary-content border rounded border-transparent border-solid hover:bg-base-300 pointer-coarse:my-0 pointer-coarse:px-2 pointer-coarse:min-h-11 pointer-coarse:border-base-300 pointer-coarse:text-sm"
           >
             <span>{layer_item.name}</span>
-            <Pencil
-              className="h-4 w-4 mx-1 invisible group-hover:visible"
+            {/*
+              Touch adaptation (PLAN.md stage 4 / risk 10). Two separate defects
+              made the rename affordance unusable on a touch screen:
+
+              1. Reachability. It used to be `invisible group-hover:visible`, so
+                 it never appeared without a mouse. The hide-until-hover rule is
+                 now scoped to `pointer: fine`, leaving desktop untouched while
+                 touch devices always show it. The wrapper span — not the SVG,
+                 whose box is the drawn glyph — carries the 44px tap target.
+
+              2. Activation. The enclosing react-aria ListBoxItem runs usePress,
+                 which suppresses the synthetic click the browser would normally
+                 emit after `touchend`; verified with Playwright touch emulation
+                 (pointerdown/touchstart/pointerup/touchend all fire, `click`
+                 never does). So `onClick` alone is dead on touch, and we also
+                 activate from `onPointerUp` for non-mouse pointers. Should a
+                 click arrive anyway on some WebView, the duplicate call just
+                 re-opens the modal with identical data, which is a no-op.
+
+              This deliberately stays a span rather than a <button>: the parent
+              has role="option", which must not contain interactive descendants.
+            */}
+            <span
+              className="mx-1 flex items-center justify-center pointer-coarse:mx-0.5 pointer-coarse:size-9 pointer-fine:invisible pointer-fine:group-hover:visible"
               onClick={() =>
                 setEditLabelData({ id: layer_item.id, name: layer_item.name })
               }
-            />
+              onPointerUp={(e) => {
+                if (e.pointerType !== "mouse") {
+                  setEditLabelData({
+                    id: layer_item.id,
+                    name: layer_item.name,
+                  });
+                }
+              }}
+            >
+              <Pencil className="h-4 w-4" />
+            </span>
           </ListBoxItem>
         )}
       </ListBox>

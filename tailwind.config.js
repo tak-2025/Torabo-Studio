@@ -3,6 +3,26 @@ import trac from "tailwindcss-react-aria-components";
 import contQueries from "@tailwindcss/container-queries";
 import daisyui from "daisyui";
 
+// `pointer-coarse:`/`pointer-fine:` touch adaptation. Tailwind v3 has no
+// built-in `pointer:` variants (those landed in v4), so it is registered
+// here. Everything touch-specific is expressed as a CSS media query rather
+// than a runtime platform check, so this build (mouse/trackpad — `pointer:
+// fine`) renders exactly as before; only a touch build (the Android/Capacitor
+// shell) sees any difference, and only from this file plus the components
+// that opt in.
+//
+//   pointer-coarse: -> touch (a touchscreen, on any build)
+//   pointer-fine:   -> mouse / trackpad (desktop, Tauri)
+//
+// Declared as a bare function rather than via `tailwindcss/plugin`: importing
+// that CJS module flips jiti's ESM interop for this config and breaks the
+// `tailwindcss-react-aria-components` import above. Tailwind wraps plain
+// functions in `plugin()` itself, so this is equivalent.
+const pointerVariants = ({ addVariant }) => {
+  addVariant("pointer-coarse", "@media (pointer: coarse)");
+  addVariant("pointer-fine", "@media (pointer: fine)");
+};
+
 export default {
   content: ["./index.html", "./download.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
@@ -20,7 +40,7 @@ export default {
       },
     },
   },
-  plugins: [contQueries, trac({ prefix: "rac" }), daisyui],
+  plugins: [contQueries, trac({ prefix: "rac" }), pointerVariants, daisyui],
   daisyui: {
     themes: [
       {

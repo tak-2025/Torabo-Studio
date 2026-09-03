@@ -12,14 +12,32 @@ import { useModalRef } from "./misc/useModalRef";
 import { LockStateContext } from "./rpc/LockStateContext";
 import { LockState } from "@zmkfirmware/zmk-studio-ts-client/core";
 import { ConnectionContext } from "./rpc/ConnectionContext";
-import { ChevronDown, Undo2, Redo2, Save, Trash2, Languages, Keyboard } from "lucide-react";
+import {
+  ALargeSmall,
+  ChevronDown,
+  Info,
+  Keyboard,
+  Languages,
+  Loader2,
+  Redo2,
+  Save,
+  Trash2,
+  Undo2,
+} from "lucide-react";
 import { Tooltip } from "./misc/Tooltip";
 import { GenericModal } from "./GenericModal";
 import { useI18n, LANGS } from "./i18n";
 import { KEY_LAYOUTS, useKeyLayout } from "./keyboard/KeyLayoutContext";
+import { UI_SCALES, useUiScale } from "./misc/useUiScale";
+import { useCurrentSyncStep } from "./rpc/SyncStatusContext";
+import { syncStepLabelKey } from "./rpc/syncStatus";
 
 export interface AppHeaderProps {
   connectedDeviceLabel?: string;
+  /** Touch builds only: the footer is hidden there, so its two links live
+   *  behind the header's ⓘ button instead. */
+  onShowAbout?: () => void;
+  onShowLicenseNotice?: () => void;
   onSave?: () => void | Promise<void>;
   onDiscard?: () => void | Promise<void>;
   onUndo?: () => Promise<void>;
@@ -40,13 +58,19 @@ export const AppHeader = ({
   onDiscard,
   onDisconnect,
   onResetSettings,
+  onShowAbout,
+  onShowLicenseNotice,
 }: AppHeaderProps) => {
   const [showSettingsReset, setShowSettingsReset] = useState(false);
 
   const { lang, setLang, t } = useI18n();
   const { keyLayout, setKeyLayout } = useKeyLayout();
+  const { scale: uiScale, cycle: cycleUiScale } = useUiScale();
   const lockState = useContext(LockStateContext);
   const connectionState = useContext(ConnectionContext);
+  // The one connect-time read still running, or null once they've all
+  // settled — see rpc/SyncStatusContext for who reports into this.
+  const syncStep = useCurrentSyncStep();
 
   useEffect(() => {
     if (
@@ -98,35 +122,94 @@ export const AppHeader = ({
           </div>
         </div>
       </GenericModal>
-      <MenuTrigger>
-        <Button
-          className="text-center rac-disabled:opacity-0 hover:bg-base-300 transition-all duration-100 p-1 pl-2 rounded-lg"
-          isDisabled={!connectedDeviceLabel}
-        >
-          {connectedDeviceLabel}
-          <ChevronDown className="inline-block w-4" />
-        </Button>
-        <Popover>
-          <Menu className="shadow-md rounded bg-base-100 text-base-content cursor-pointer overflow-hidden">
-            <MenuItem
-              className="px-2 py-1 hover:bg-base-200"
-              onAction={onDisconnect}
-            >
-              {t("header.disconnect")}
-            </MenuItem>
-            <MenuItem
-              className="px-2 py-1 hover:bg-base-200"
-              onAction={() => setShowSettingsReset(true)}
-            >
-              {t("header.restoreStock")}
-            </MenuItem>
-          </Menu>
-        </Popover>
-      </MenuTrigger>
+      <div className="flex items-center gap-2 min-w-0">
+        <MenuTrigger>
+          <Button
+            className="text-center rac-disabled:opacity-0 hover:bg-base-300 transition-all duration-100 p-1 pl-2 rounded-lg pointer-coarse:py-2.5"
+            isDisabled={!connectedDeviceLabel}
+          >
+            {connectedDeviceLabel}
+            <ChevronDown className="inline-block w-4" />
+          </Button>
+          <Popover>
+            <Menu className="shadow-md rounded bg-base-100 text-base-content cursor-pointer overflow-hidden">
+              <MenuItem
+                className="px-2 py-1 hover:bg-base-200 pointer-coarse:py-3"
+                onAction={onDisconnect}
+              >
+                {t("header.disconnect")}
+              </MenuItem>
+              <MenuItem
+                className="px-2 py-1 hover:bg-base-200 pointer-coarse:py-3"
+                onAction={() => setShowSettingsReset(true)}
+              >
+                {t("header.restoreStock")}
+              </MenuItem>
+            </Menu>
+          </Popover>
+        </MenuTrigger>
+        {/* Unobtrusive: text + a spinner, no layout reserved for it while
+            idle, gone the moment the last connect-time read settles. */}
+        {syncStep && (
+          <span
+            role="status"
+            className="flex items-center gap-1 text-xs text-base-content/60 whitespace-nowrap"
+          >
+            <Loader2 className="inline-block w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+            {t(syncStepLabelKey(syncStep))}
+          </span>
+        )}
+      </div>
+      {/*
+        The `pointer-coarse:` padding bumps throughout this header exist only to
+        raise these controls to a 44px tap target on touch screens (PLAN.md
+        stage 4). They are pure media-query additions, so the desktop/Tauri
+        build renders exactly as before.
+      */}
       <div className="flex justify-end items-center gap-1 px-2">
+        {/* Touch only: a phone, a Fold and a tablet each want a different text
+            size, and the desktop build has a window the user can already
+            resize. pointer-fine:hidden keeps it out of the PC header. */}
+        {(onShowAbout || onShowLicenseNotice) && (
+          <MenuTrigger>
+            <Button className="flex items-center justify-center p-1.5 rounded enabled:hover:bg-base-300 pointer-coarse:p-2.5 pointer-fine:hidden">
+              <Info className="inline-block w-4" aria-label={t("footer.about")} />
+            </Button>
+            <Popover>
+              <Menu className="shadow-md rounded bg-base-100 text-base-content cursor-pointer overflow-hidden">
+                <MenuItem
+                  className="px-2 py-1 hover:bg-base-200 pointer-coarse:py-3"
+                  onAction={onShowAbout}
+                >
+                  {t("footer.about")}
+                </MenuItem>
+                <MenuItem
+                  className="px-2 py-1 hover:bg-base-200 pointer-coarse:py-3"
+                  onAction={onShowLicenseNotice}
+                >
+                  {t("footer.license")}
+                </MenuItem>
+              </Menu>
+            </Popover>
+          </MenuTrigger>
+        )}
+        <Tooltip label={t("uiscale.label")}>
+          <Button
+            className="flex items-center justify-center gap-1 p-1.5 rounded enabled:hover:bg-base-300 pointer-coarse:p-2.5 pointer-fine:hidden"
+            onPress={cycleUiScale}
+          >
+            <ALargeSmall
+              className="inline-block w-4"
+              aria-label={t("uiscale.label")}
+            />
+            <span className="text-xs font-semibold whitespace-nowrap">
+              {UI_SCALES.find((s) => s.id === uiScale)?.label}
+            </span>
+          </Button>
+        </Tooltip>
         <Tooltip label={`${t("keylayout.label")} — ${t("keylayout.desc")}`}>
           <Button
-            className="flex items-center justify-center gap-1 p-1.5 rounded enabled:hover:bg-base-300"
+            className="flex items-center justify-center gap-1 p-1.5 rounded enabled:hover:bg-base-300 pointer-coarse:p-2.5"
             onPress={() =>
               setKeyLayout(
                 KEY_LAYOUTS[
@@ -147,7 +230,7 @@ export const AppHeader = ({
         </Tooltip>
         <Tooltip label={t("lang.label")}>
           <Button
-            className="flex items-center justify-center gap-1 p-1.5 rounded enabled:hover:bg-base-300"
+            className="flex items-center justify-center gap-1 p-1.5 rounded enabled:hover:bg-base-300 pointer-coarse:p-2.5"
             onPress={() =>
               setLang(
                 LANGS[(LANGS.findIndex((l) => l.id === lang) + 1) % LANGS.length]
@@ -164,7 +247,7 @@ export const AppHeader = ({
         {onUndo && (
           <Tooltip label={t("tooltip.undo")}>
             <Button
-              className="flex items-center justify-center p-1.5 rounded enabled:hover:bg-base-300 disabled:opacity-50"
+              className="flex items-center justify-center p-1.5 rounded enabled:hover:bg-base-300 disabled:opacity-50 pointer-coarse:p-2.5"
               isDisabled={!canUndo}
               onPress={onUndo}
             >
@@ -176,7 +259,7 @@ export const AppHeader = ({
         {onRedo && (
           <Tooltip label={t("tooltip.redo")}>
             <Button
-              className="flex items-center justify-center p-1.5 rounded enabled:hover:bg-base-300 disabled:opacity-50"
+              className="flex items-center justify-center p-1.5 rounded enabled:hover:bg-base-300 disabled:opacity-50 pointer-coarse:p-2.5"
               isDisabled={!canRedo}
               onPress={onRedo}
             >
@@ -186,7 +269,7 @@ export const AppHeader = ({
         )}
         <Tooltip label={t("tooltip.save")}>
           <Button
-            className="flex items-center justify-center p-1.5 rounded enabled:hover:bg-base-300 disabled:opacity-50"
+            className="flex items-center justify-center p-1.5 rounded enabled:hover:bg-base-300 disabled:opacity-50 pointer-coarse:p-2.5"
             isDisabled={!unsaved}
             onPress={onSave}
           >
@@ -195,7 +278,7 @@ export const AppHeader = ({
         </Tooltip>
         <Tooltip label={t("tooltip.discard")}>
           <Button
-            className="flex items-center justify-center p-1.5 rounded enabled:hover:bg-base-300 disabled:opacity-50"
+            className="flex items-center justify-center p-1.5 rounded enabled:hover:bg-base-300 disabled:opacity-50 pointer-coarse:p-2.5"
             onPress={onDiscard}
             isDisabled={!unsaved}
           >

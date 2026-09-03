@@ -27,8 +27,11 @@ import { useToraboCaps } from "./caps/useToraboCaps";
 import { FirmwareInfoPanel } from "./caps/FirmwareInfoPanel";
 import { hasConfigAccess } from "./backends";
 import { ConnectionContext } from "./rpc/ConnectionContext";
+import { useSyncStep } from "./rpc/SyncStatusContext";
 import { Feature, hasFeature, ledSides } from "./caps/toraboCaps";
+import { TAB_GROUP_LABEL_CLASS, TAB_LABEL_CLASS } from "./platform/layout";
 import MacrosPanel from "./dynamic_macros/MacrosPanel";
+import { useAutoMacroNames } from "./dynamic_macros/useAutoMacroNames";
 import CombosPanel from "./dynamic_combos/CombosPanel";
 import BackupPanel from "./backup/BackupPanel";
 import { useT } from "./i18n";
@@ -189,6 +192,15 @@ export function MainPanels() {
   // The raw bytes are for the firmware-info tab alone: it is the one place that
   // shows the descriptor rather than acting on it.
   const { caps, raw: capsRaw, loading: capsLoading } = useToraboCaps();
+  useSyncStep(capsLoading, "caps");
+
+  // `&dmac N` keycaps on the keymap board (Keyboard.tsx -> Keymap.tsx) want the
+  // macro slot's name as soon as it is known, not only after the user has
+  // opened the マクロ tab — see dynamic_macros/useAutoMacroNames.ts. Called here
+  // (rather than inside MacroNamesProvider, which wraps this component in
+  // App.tsx) so it reuses THIS `caps`, from the one useToraboCaps() call above,
+  // instead of running a second capability read in parallel with it.
+  useAutoMacroNames(caps);
 
   // The config services need either the GATT backend or a working RPC tunnel
   // (setupToraboAccess in App.tsx). A connection that has neither — USB/serial
@@ -252,14 +264,14 @@ export function MainPanels() {
                 {groupStart && (
                   <span
                     aria-hidden="true"
-                    className="hidden sm:block text-[10px] leading-none font-semibold uppercase tracking-wider text-base-content/40"
+                    className={TAB_GROUP_LABEL_CLASS}
                   >
                     {t(group.labelKey)}
                   </span>
                 )}
                 <span className="flex items-center gap-1.5">
                   <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
-                  <span className="hidden sm:inline">{t(tab.labelKey)}</span>
+                  <span className={TAB_LABEL_CLASS}>{t(tab.labelKey)}</span>
                 </span>
               </span>
             </Tab>

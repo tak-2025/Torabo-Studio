@@ -43,6 +43,48 @@ function Field({
   );
 }
 
+/**
+ * Touch adaptation (PLAN.md stage 4), shared by every slider on this panel.
+ *
+ * COARSE_RANGE enlarges the `<input type=range>` itself: the element box is the
+ * press region, so the height alone buys a 44px-tall strip to press anywhere
+ * on, and the thumb/track pseudo-elements are scaled so the thumb is actually
+ * catchable by a fingertip. `--filler-offset` is daisyUI's own variable for
+ * where the filled part of the track ends under the thumb; it tracks half the
+ * thumb width, so it has to scale with it.
+ *
+ * (Comments here avoid bare Tailwind-looking tokens on purpose — the content
+ * scanner reads comments too, and would emit unused non-coarse utilities.)
+ *
+ * STEP_BTN is the ±1 step affordance. A 0–2000ms range at step 10 is ~200
+ * stops across the track — roughly one pixel each — so dragging can reach a
+ * neighbourhood but never an exact value. The buttons are `hidden` by default
+ * and every other class on them is `pointer-coarse:`-scoped, so on a fine
+ * pointer they are `display: none` and contribute no geometry at all (flex
+ * `gap` is not applied around a `display: none` item either).
+ *
+ * They sit AFTER the range input on purpose: `Field` wraps its children in a
+ * `<label>`, whose labelled control is its FIRST labelable descendant, and
+ * `<button>` is labelable. Placing them first would silently re-point the
+ * field label at the − button.
+ */
+const COARSE_RANGE =
+  "pointer-coarse:h-11 pointer-coarse:w-56 " +
+  "pointer-coarse:[&::-webkit-slider-runnable-track]:h-2 " +
+  "pointer-coarse:[&::-moz-range-track]:h-2 " +
+  "pointer-coarse:[&::-webkit-slider-thumb]:size-8 " +
+  "pointer-coarse:[&::-webkit-slider-thumb]:[--filler-offset:1rem] " +
+  "pointer-coarse:[&::-moz-range-thumb]:size-8 " +
+  "pointer-coarse:[&::-moz-range-thumb]:[--filler-offset:1rem]";
+
+const STEP_BTN =
+  "hidden pointer-coarse:inline-flex pointer-coarse:size-11 " +
+  "pointer-coarse:shrink-0 pointer-coarse:items-center " +
+  "pointer-coarse:justify-center pointer-coarse:rounded-md " +
+  "pointer-coarse:border pointer-coarse:border-base-300 " +
+  "pointer-coarse:bg-base-200 pointer-coarse:text-lg " +
+  "pointer-coarse:leading-none pointer-coarse:disabled:opacity-40";
+
 /** A labelled range slider with a live numeric readout — the shared control for
  * every millisecond value on this panel (tapping-term / quick-tap /
  * require-prior-idle / debounce). */
@@ -65,24 +107,45 @@ function SliderField({
   disabled?: boolean;
   onChange: (v: number) => void;
 }) {
+  const clamped = Math.min(max, Math.max(min, value));
+  const nudge = (dir: number) =>
+    onChange(Math.min(max, Math.max(min, clamped + dir * step)));
   return (
     <Field label={label}>
       <div className="flex items-center gap-2">
         <input
           type="range"
-          className="range range-sm w-48"
+          className={"range range-sm w-48 " + COARSE_RANGE}
           aria-label={label}
           min={min}
           max={max}
           step={step}
-          value={Math.min(max, Math.max(min, value))}
+          value={clamped}
           disabled={disabled}
           onChange={(e) => onChange(Number(e.target.value))}
         />
+        <button
+          type="button"
+          className={STEP_BTN}
+          aria-label={`${label} −${step}${unit}`}
+          disabled={disabled || clamped <= min}
+          onClick={() => nudge(-1)}
+        >
+          −
+        </button>
         <span className="font-mono text-sm w-16 text-right tabular-nums">
           {value}
           {unit}
         </span>
+        <button
+          type="button"
+          className={STEP_BTN}
+          aria-label={`${label} +${step}${unit}`}
+          disabled={disabled || clamped >= max}
+          onClick={() => nudge(1)}
+        >
+          +
+        </button>
       </div>
     </Field>
   );
@@ -141,10 +204,16 @@ function PositionPicker({
           </span>
         )}
         {positions.map((p, i) => (
-          <span key={i} className="badge badge-primary gap-1 font-mono">
+          <span
+            key={i}
+            className="badge badge-primary gap-1 font-mono pointer-coarse:h-11 pointer-coarse:pr-0 pointer-coarse:text-base"
+          >
             {p}
+            {/* daisyUI's badge is 20px tall and this × was the whole of it.
+                Grow the badge and let the × fill it as a 44px square. */}
             <button
               type="button"
+              className="pointer-coarse:size-11 pointer-coarse:inline-flex pointer-coarse:items-center pointer-coarse:justify-center pointer-coarse:text-xl"
               aria-label={t("tm.aria.removePos", { n: p })}
               onClick={() => removePos(i)}
             >
@@ -155,7 +224,7 @@ function PositionPicker({
         {layoutPositions && (
           <button
             type="button"
-            className="btn btn-xs btn-outline gap-1"
+            className="btn btn-xs btn-outline gap-1 pointer-coarse:min-h-11 pointer-coarse:px-4 pointer-coarse:text-sm"
             onClick={() => setShowPicker((v) => !v)}
           >
             {showPicker ? t("tm.pos.hideLayout") : t("tm.pos.pickLayout")}
@@ -165,14 +234,14 @@ function PositionPicker({
           <input
             type="number"
             min={0}
-            className="input input-bordered input-xs w-16"
+            className="input input-bordered input-xs w-16 pointer-coarse:min-h-11 pointer-coarse:w-20 pointer-coarse:leading-[2.75rem] pointer-coarse:text-base"
             value={manual}
             onChange={(e) => setManual(Math.max(0, Number(e.target.value) | 0))}
             aria-label={t("tm.aria.addPosByNumber", { id: idPrefix })}
           />
           <button
             type="button"
-            className="btn btn-xs gap-1"
+            className="btn btn-xs gap-1 pointer-coarse:min-h-11 pointer-coarse:px-4 pointer-coarse:text-sm"
             onClick={addManual}
             disabled={positions.length >= TMG_HT_POS_SLOTS}
           >
@@ -217,7 +286,7 @@ function HtNodeCard({
 
       <Field label={t("tm.preset")}>
         <select
-          className="select select-bordered select-sm w-72"
+          className="select select-bordered select-sm w-72 pointer-coarse:min-h-11 pointer-coarse:leading-[2.75rem]"
           aria-label={t("tm.aria.preset", { node: nodeLabel })}
           value={presetId ?? "custom"}
           onChange={(e) => {
@@ -235,7 +304,9 @@ function HtNodeCard({
       </Field>
 
       <details className="rounded border border-base-300 bg-base-200/30 p-2">
-        <summary className="cursor-pointer text-sm font-semibold select-none">
+        {/* Padding rather than a height: a `<summary>` has to keep its default
+            display or the disclosure triangle disappears. */}
+        <summary className="cursor-pointer text-sm font-semibold select-none pointer-coarse:py-3">
           {t("tm.advanced")}
         </summary>
         <div className="flex flex-col gap-3 mt-3">
@@ -250,7 +321,7 @@ function HtNodeCard({
 
           <Field label={t("tm.flavor")}>
             <select
-              className="select select-bordered select-sm w-72"
+              className="select select-bordered select-sm w-72 pointer-coarse:min-h-11 pointer-coarse:leading-[2.75rem]"
               aria-label={t("tm.aria.flavor", { node: nodeLabel })}
               value={cfg.flavor}
               onChange={(e) =>
@@ -266,10 +337,14 @@ function HtNodeCard({
           </Field>
 
           <div className="flex flex-col gap-1">
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-sm pointer-coarse:min-h-11">
+              {/* The <label> already gives the row a 44px tap target; the box
+                  only grows so there is something to aim at. It needs the
+                  important modifier because daisyUI sizes checkboxes with
+                  `[type=checkbox].checkbox-sm`, which outranks a utility. */}
               <input
                 type="checkbox"
-                className="checkbox checkbox-sm"
+                className="checkbox checkbox-sm pointer-coarse:!size-6"
                 checked={cfg.quickTapMs >= 0}
                 onChange={(e) =>
                   set({ quickTapMs: e.target.checked ? 150 : -1 })
@@ -289,10 +364,10 @@ function HtNodeCard({
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-sm pointer-coarse:min-h-11">
               <input
                 type="checkbox"
-                className="checkbox checkbox-sm"
+                className="checkbox checkbox-sm pointer-coarse:!size-6"
                 checked={cfg.requirePriorIdleMs >= 0}
                 onChange={(e) =>
                   set({ requirePriorIdleMs: e.target.checked ? 150 : -1 })
@@ -315,19 +390,19 @@ function HtNodeCard({
             <span className="text-xs font-semibold text-base-content/70">
               {t("tm.positional")}
             </span>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-sm pointer-coarse:min-h-11">
               <input
                 type="checkbox"
-                className="checkbox checkbox-sm"
+                className="checkbox checkbox-sm pointer-coarse:!size-6"
                 checked={cfg.retroTap}
                 onChange={(e) => set({ retroTap: e.target.checked })}
               />
               {t("tm.retroTap")}
             </label>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-sm pointer-coarse:min-h-11">
               <input
                 type="checkbox"
-                className="checkbox checkbox-sm"
+                className="checkbox checkbox-sm pointer-coarse:!size-6"
                 checked={cfg.holdTriggerOnRelease}
                 onChange={(e) =>
                   set({ holdTriggerOnRelease: e.target.checked })
@@ -335,10 +410,10 @@ function HtNodeCard({
               />
               {t("tm.holdTriggerOnRelease")}
             </label>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-sm pointer-coarse:min-h-11">
               <input
                 type="checkbox"
-                className="checkbox checkbox-sm"
+                className="checkbox checkbox-sm pointer-coarse:!size-6"
                 checked={cfg.holdWhileUndecided}
                 onChange={(e) =>
                   set({ holdWhileUndecided: e.target.checked })

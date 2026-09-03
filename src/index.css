@@ -26,3 +26,56 @@ body {
   width: 100vw;
   height: 100vh;
 }
+
+/*
+ * One step smaller on touch screens, times whatever the user picked.
+ *
+ * `--ui-scale` is set by misc/useUiScale.ts (the A button in the header). It
+ * defaults to 1 here so the stylesheet is correct on its own — a phone, a Fold
+ * and a tablet need different answers and no media query can pick for them.
+ *
+ * The type scale is tuned for a desktop window; on a phone the same sizes eat
+ * the space the board needs. This shrinks TEXT ONLY — the `pointer-coarse:`
+ * padding and min-height utilities that keep tap targets at 44px are untouched,
+ * which is why this is not done by lowering the root font size (that would drag
+ * the tap targets down with it).
+ *
+ * Placed after `@tailwind utilities` on purpose: same specificity as the
+ * utilities it replaces, so source order decides and these win.
+ */
+@media (pointer: coarse) {
+  .text-xs {
+    font-size: calc(0.6875rem * var(--ui-scale, 1));
+    line-height: calc(0.9375rem * var(--ui-scale, 1));
+  }
+  .text-sm {
+    font-size: calc(0.8125rem * var(--ui-scale, 1));
+    line-height: calc(1.125rem * var(--ui-scale, 1));
+  }
+  .text-base {
+    font-size: calc(0.875rem * var(--ui-scale, 1));
+    line-height: calc(1.25rem * var(--ui-scale, 1));
+  }
+  .text-lg {
+    font-size: calc(1rem * var(--ui-scale, 1));
+    line-height: calc(1.5rem * var(--ui-scale, 1));
+  }
+  .text-xl {
+    font-size: calc(1.125rem * var(--ui-scale, 1));
+    line-height: calc(1.5rem * var(--ui-scale, 1));
+  }
+  .text-2xl {
+    font-size: calc(1.25rem * var(--ui-scale, 1));
+    line-height: calc(1.625rem * var(--ui-scale, 1));
+  }
+  .text-3xl {
+    font-size: calc(1.5rem * var(--ui-scale, 1));
+    line-height: calc(1.875rem * var(--ui-scale, 1));
+  }
+  .text-fluid-lg {
+    font-size: calc(clamp(0.875rem, 0.8rem + 0.4vw, 1.0625rem) * var(--ui-scale, 1));
+  }
+  .text-fluid-xl {
+    font-size: calc(clamp(1rem, 0.9rem + 0.6vw, 1.25rem) * var(--ui-scale, 1));
+  }
+}

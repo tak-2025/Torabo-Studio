@@ -20,10 +20,17 @@
  * the board draws a label and nothing else, and keeping steps out means a
  * re-read in the macros panel cannot re-render the board over a step edit.
  *
- * Nothing populates this on connect. It fills in when the user reads the macros
- * panel (PLAN-keycap-legends.md §B-2 is where a read-on-connect belongs), and
- * `M<N>` is the standing fallback until then — the same fallback used for v1
- * firmware, which has no names to read at all.
+ * Populated two ways, both writing through the same `setNames` below, so a
+ * later write simply overwrites an earlier one with no "which source wins"
+ * logic needed:
+ *   - automatically, once a connection is up and the capability descriptor
+ *     says this firmware's macros wire carries names (dynamic_macros/
+ *     useAutoMacroNames.ts, called from MainPanels.tsx where `caps` already
+ *     lives);
+ *   - manually, whenever the user opens the マクロ tab and presses 読み込む
+ *     (MacrosPanel.onRead).
+ * `M<N>` is the standing fallback before either has run, and permanently on
+ * v1 firmware, which has no names to read at all.
  */
 import {
   createContext,

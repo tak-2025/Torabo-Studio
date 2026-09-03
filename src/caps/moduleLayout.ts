@@ -3,26 +3,48 @@
  *
  * WHAT THIS CAN AND CANNOT KNOW — read this before adding a rule.
  *
- * The keyboard never sends a parts list. This derives one from two things it
- * DOES send, and the two know different amounts:
+ * The keyboard never sends a parts list. This derives one from three things it
+ * can send, and they know different amounts:
  *
- *   1. The LED caps bits (TORABO_CAPS_LED_LEFT / _RIGHT / _CENTRAL_IS_LEFT in
- *      caps.h). They say which halves have an LED extension board, and which
- *      half is the split central. Their blind spot: an extension base with no
- *      LED on it is invisible here — the bits are about the LED, not the board
- *      it rides. So base presence is derived from these bits OR from a device
- *      reported on the extension connector, never from the bits alone.
+ *   1. The header's `_rsv` byte and Feature.Modules' caps word
+ *      (caps.h's TORABO_CAPS_HDR_CENTRAL_MASK / TORABO_FEAT_MODULES,
+ *      redesigned 2026-09-04, superseding the previous day's per-feature
+ *      TrackballCap/EncoderCap side-bit scheme). A builder that opts in
+ *      DECLARES which half is central, and — in ONE unified caps word rather
+ *      than one per feature — what each of the four connectors carries: a
+ *      pad, a ball, an encoder, or explicitly nothing (ModuleKind,
+ *      toraboCaps.ts). Every slot independent, so any mix is expressible: a
+ *      ball on one standard module and nothing declared on the other, an
+ *      encoder on all four connectors, etc. An unset Kconfig (every
+ *      pre-2026-09-04 build, and any build that leaves a slot unconfigured)
+ *      reports that slot as 0 = Undeclared, which is indistinguishable from
+ *      "not declared" — hence the per-slot inference fallback below.
  *
- *   2. The trackpad wire's per-device meta byte
+ *   2. The LED caps bits (TORABO_CAPS_LED_LEFT / _RIGHT / _CENTRAL_IS_LEFT in
+ *      caps.h). They say which halves have an LED extension board, and — the
+ *      only way to learn it before phase9 — which half is the split central.
+ *      Their blind spot: an extension base with no LED on it is invisible
+ *      here — the bits are about the LED, not the board it rides. So base
+ *      presence is derived from these bits OR from a device reported on the
+ *      extension connector, never from the bits alone. Central side now
+ *      defers to `_rsv` first (step 1) and only falls back to this bit for an
+ *      LED-less build or pre-phase9 firmware.
+ *
+ *   3. The trackpad wire's per-device meta byte
  *      (torabo-tsuki_ext_FW/trackpad/include/zmk_trackpad_config/config.h,
  *      TP_META_*). This is the authoritative placement: side, connector and
  *      kind, straight from the build's Kconfig. It covers only devices on that
- *      wire, and firmware older than the meta byte sends 0 = unknown.
+ *      wire, and firmware older than the meta byte sends 0 = unknown. Its kind
+ *      numbering (TpKind) is deliberately identical to ModuleKind's — the two
+ *      channels can name the same physical device, so a cell the wire already
+ *      placed a device in and a slot Feature.Modules also declares are
+ *      deduped by comparing the numbers directly (see step 4 below).
  *
- * And what neither can tell:
+ * And what none of the three can tell, when a slot is Undeclared (0) and no
+ * trackpad-wire device already accounts for it:
  *
  *   - Feature.Trackball (caps id 1) says the SPI trackball module is compiled
- *     in. Nothing in caps or the ztc wire says which half it is on.
+ *     in, full stop. Nothing in the ztc wire itself says which half it is on.
  *   - Feature.Encoder (caps id 5) says the encoder config module is compiled
  *     in. Its wire (src/encoder/encConfig.ts) is magic/version/layerCount and
  *     then bindings — VERIFIED to carry no placement of any kind. (A rotary
@@ -30,31 +52,41 @@
  *     come with a meta byte; that one lands in a cell like any other device.)
  *
  * REPORT VS INFERENCE
- * Those last two are placed anyway, by the rules in steps 3 and 4 below: the
- * ball onto the central's standard FFC, the encoder onto whatever single cell
- * is left once the taken ones are ruled out. That is sound only because the
- * section presents itself as an estimate (fw.mod.desc, 「FW情報から推定して
- * います。」) — and only as long as the two are not passed off as reports. So
- * every inferred item carries `inferred: true` and the panel renders it
+ * A slot Feature.Modules declares (1=pad, 2=ball, 3=encoder) is placed as a
+ * REPORT — same badge treatment as a trackpad-wire device. A slot declared 4
+ * (None) is placed as an explicit, subdued "empty" marker, and — this is the
+ * whole reason None exists as a value distinct from Undeclared — blocks any
+ * inference from landing in that cell. Only for a slot left at Undeclared (0)
+ * does the pre-declaration estimate still apply: the ball onto the central's
+ * standard FFC, the encoder onto whatever single cell is left once the taken
+ * ones are ruled out. That estimate is sound only because the section says so
+ * (fw.mod.desc) — and only as long as it is not passed off as a report. So
+ * every inferred item still carries `inferred: true` and the panel renders it
  * differently, and an inference that runs out of certainty (central unknown,
- * two candidate cells) falls back to the unplaced list rather than picking.
+ * two candidate cells) still falls back to the unplaced list rather than
+ * picking.
  *
- * Hence the shape below: a 2x2 grid of what is placed or deduced, a list of
- * what is present but unplaceable, and notes for what could not be read. An
- * empty cell means "nothing known here", never "there is nothing here" — the
- * panel says so, because that is the difference between this and a parts list.
+ * Hence the shape below: a 2x2 grid of what is placed (reported, explicitly
+ * empty, or deduced), a list of what is present but unplaceable, and notes
+ * for what could not be read. An empty cell means "nothing known here", never
+ * "there is nothing here" — the panel says so, because that is the difference
+ * between this and a parts list.
  *
  * Pure, and returns message keys like fwInfo.ts, so the rules can be tested
  * without a React tree.
  */
 
 import {
+  CapsSide,
   Feature,
   LedCap,
+  ModuleKind,
   ToraboCaps,
+  centralSideFromHeader,
   featureInfo,
   hasFeature,
   ledSides,
+  moduleSlots,
 } from "./toraboCaps";
 import type { Msg } from "./fwInfo";
 import { TpConn, TpKind, TpSide, decodeMeta } from "../trackpad/tpConfigV2";
@@ -103,13 +135,21 @@ export function sideRole(
  * One module shown in a cell.
  *
  * `inferred` separates the two kinds of statement this section makes: a device
- * the firmware placed by its meta byte is a report, while a trackball or an
- * encoder put in a cell by the rules below is a deduction from what the build
- * can be. Both are worth showing; presenting them in the same typeface would
- * not be. The panel renders inferred items differently for that reason.
+ * the firmware placed by its meta byte (or a slot Feature.Modules declared) is
+ * a report, while a trackball or an encoder put in a cell by the fallback
+ * rules below is a deduction from what the build can be. Both are worth
+ * showing; presenting them in the same typeface would not be. The panel
+ * renders inferred items differently for that reason.
+ *
+ * `empty` marks the OTHER positive statement a slot can make: ModuleKind.None
+ * says this connector is populated with nothing, which is not the same claim
+ * as an ordinary empty cell (nothing reported either way). The panel renders
+ * it as a subdued marker — not a solid report of a module, not a dashed
+ * inference, but not silence either.
  */
 export interface LayoutItem extends Msg {
   inferred?: boolean;
+  empty?: boolean;
 }
 
 export interface LayoutCell {
@@ -167,11 +207,25 @@ const CELLS: { side: LayoutSide; conn: LayoutConn }[] = [
 ];
 
 /** Same key set describeDevice() uses in tpConfigV2.ts — one wire, one set of
- * names for the things on it. */
+ * names for the things on it. Also what Feature.Modules' declared slots use to
+ * label a cell (step 3 below), since ModuleKind and TpKind share their 1/2/3
+ * numbering by design. */
 const KIND_KEYS: Record<number, string> = {
   [TpKind.Trackpad]: "tp.kind.trackpad",
   [TpKind.Trackball]: "tp.kind.trackball",
   [TpKind.Encoder]: "tp.kind.encoder",
+};
+
+/** Where a declared slot goes when it loses a contradiction with the trackpad
+ * wire's own report for the same cell (step 3 below) — same "present, but not
+ * placeable here" wording the pre-declaration inference falls back to when
+ * ITS estimate is contradicted. No entry for Pad: nothing in this app has
+ * ever needed to say "a pad exists somewhere unplaceable" outside of what the
+ * wire itself already lists in `unplaced`, so a contradicted declared pad is
+ * simply dropped rather than inventing a message nothing else uses. */
+const MODULE_KIND_UNPLACED_KEY: Partial<Record<number, string>> = {
+  [ModuleKind.Ball]: "fw.mod.trackball",
+  [ModuleKind.Encoder]: "fw.mod.encoder",
 };
 
 /** One device on the trackpad wire, as much of it as this module needs. */
@@ -249,22 +303,40 @@ export function deriveModuleLayout(
     cellAt(side, TpConn.Extension).items.push({ key: "fw.mod.led" });
   }
 
-  // Which half is the central. Only meaningful when the LED module is in the
-  // build at all: the bit is emitted from its Kconfig, so with no LED entry
-  // there is no statement either way — and a cleared bit inside a present entry
-  // IS a statement ("central is not left"), not an absence.
+  // Which half is the central. `_rsv` (PLAN-ext-fw-refactor.md フェーズ9)
+  // takes priority: it is reported independently of any feature, so it works
+  // even on an LED-less build, which is exactly the hole the LED bit alone
+  // could not fill. Fall back to LedCap.CentralIsLeft for firmware built
+  // before phase9 (header reports CapsSide.Unknown = 0, matching every
+  // pre-phase9 descriptor byte-for-byte). Only meaningful when the LED module
+  // is in the build at all: the bit is emitted from its Kconfig, so with no
+  // LED entry there is no statement either way — and a cleared bit inside a
+  // present entry IS a statement ("central is not left"), not an absence.
+  const hdrCentral = centralSideFromHeader(caps);
   const ledInfo = featureInfo(caps, Feature.Led);
-  const central: LayoutSide | null = ledInfo
+  const ledCentral: LayoutSide | null = ledInfo
     ? (ledInfo.caps & LedCap.CentralIsLeft) !== 0
       ? TpSide.Left
       : TpSide.Right
     : null;
+  const central: LayoutSide | null =
+    hdrCentral === CapsSide.Left
+      ? TpSide.Left
+      : hdrCentral === CapsSide.Right
+        ? TpSide.Right
+        : ledCentral;
 
   // --- 2. the trackpad wire's devices ---------------------------------------
   const placedKinds = new Set<number>();
-  // Cells with a device in them. Drives the encoder's elimination in step 4,
-  // and stops step 3 putting a trackball where something else already is.
+  // Cells with a device in them. Drives the encoder's elimination in step 5,
+  // and stops step 3/4 putting something where a device already is.
   const occupied: CellRef[] = [];
+  // What kind sits in an occupied cell, keyed the same way cellAt() looks one
+  // up. Populated here (from the wire) and in step 3 (from a declared slot),
+  // so step 3's dedupe can compare a declared kind against whichever channel
+  // got there first.
+  const kindAt = new Map<string, number>();
+  const cellKey = (side: LayoutSide, conn: LayoutConn) => `${side}:${conn}`;
   for (const dev of devices ?? []) {
     const { side, conn, kind } = decodeMeta(dev.meta);
     placedKinds.add(kind);
@@ -272,6 +344,7 @@ export function deriveModuleLayout(
       if (conn === TpConn.Extension) extBase[side] = true;
       cellAt(side, conn).items.push(deviceLabel(dev));
       occupied.push({ side, conn });
+      kindAt.set(cellKey(side, conn), kind);
     } else {
       // meta 0, or a half-described device: it exists, we just cannot say
       // where. Listed rather than placed — see the header.
@@ -285,12 +358,74 @@ export function deriveModuleLayout(
     notes.push({ key: "fw.mod.tpPending" });
   }
 
-  // --- 3. the trackball, which the descriptor never places -------------------
-  // Only when the trackpad wire did not already account for one: a ball that
-  // came back WITH a meta byte is already in a cell, and naming it twice would
-  // read as two of them.
-  if (hasFeature(caps, Feature.Trackball) && !placedKinds.has(TpKind.Trackball)) {
-    // Two facts and one inference.
+  // --- 3. Feature.Modules' declared slots -------------------------------------
+  // caps.h TORABO_FEAT_MODULES (redesigned 2026-09-04, superseding the
+  // previous day's per-feature TrackballCap/EncoderCap side bits): one
+  // unified caps word, four 4-bit slots, each independently 0=undeclared,
+  // 1=pad, 2=ball, 3=encoder, or 4=explicitly nothing (ModuleKind,
+  // toraboCaps.ts). A declared pad/ball/encoder is a REPORT — same badge
+  // treatment as a device the trackpad wire itself placed, and indeed the
+  // kind numbering is shared with the wire's own meta byte (TpKind) on
+  // purpose, so the two channels naming the SAME device dedupe by comparing
+  // numbers rather than stacking two badges in one cell. A declared "nothing"
+  // (4) is placed as its own subdued marker, and — by being added to
+  // `occupied` like any other placement — automatically blocks both the
+  // trackball and encoder fallback inference below from landing there. An
+  // undeclared slot (0) leaves the cell for that inference to consider.
+  const slots = moduleSlots(caps);
+  const declaredKinds = new Set<number>();
+  if (slots) {
+    const bySlot: { seat: CellRef; kind: ModuleKind }[] = [
+      { seat: { side: TpSide.Left, conn: TpConn.Standard }, kind: slots.leftStd },
+      { seat: { side: TpSide.Left, conn: TpConn.Extension }, kind: slots.leftExt },
+      { seat: { side: TpSide.Right, conn: TpConn.Standard }, kind: slots.rightStd },
+      { seat: { side: TpSide.Right, conn: TpConn.Extension }, kind: slots.rightExt },
+    ];
+    for (const { seat, kind } of bySlot) {
+      if (kind === ModuleKind.Undeclared) continue;
+      const key = cellKey(seat.side, seat.conn);
+      const already = kindAt.get(key);
+
+      if (kind === ModuleKind.None) {
+        // Nothing to dedupe against a real device: if the wire already put
+        // something here, that device is the fact and the "nothing" claim
+        // is simply stale/contradictory data, dropped rather than shown.
+        if (already === undefined) {
+          cellAt(seat.side, seat.conn).items.push({ key: "fw.mod.none", empty: true });
+          occupied.push(seat);
+          kindAt.set(key, ModuleKind.None);
+        }
+        continue;
+      }
+
+      declaredKinds.add(kind);
+      if (already === kind) continue; // the wire already reported this exact device
+      if (already !== undefined) {
+        // A genuine contradiction — the wire reported a DIFFERENT kind here.
+        // One connector, one device, so the declared slot loses to the wire's
+        // own report and is listed instead of stacked.
+        const unplacedKey = MODULE_KIND_UNPLACED_KEY[kind];
+        if (unplacedKey) unplaced.push({ key: unplacedKey });
+        continue;
+      }
+      if (seat.conn === TpConn.Extension) extBase[seat.side] = true;
+      cellAt(seat.side, seat.conn).items.push({ key: KIND_KEYS[kind] });
+      occupied.push(seat);
+      kindAt.set(key, kind);
+    }
+  }
+
+  // --- 4. the trackball, when no slot declared one ----------------------------
+  // Only when neither the trackpad wire nor Feature.Modules already accounted
+  // for one: a ball reported by either channel is already in a cell, and
+  // naming it twice would read as two of them.
+  if (
+    hasFeature(caps, Feature.Trackball) &&
+    !placedKinds.has(TpKind.Trackball) &&
+    !declaredKinds.has(ModuleKind.Ball)
+  ) {
+    // Older firmware (or a build that leaves every slot Undeclared): fall
+    // back to the pre-2026-09-04 estimate. Two facts and one inference.
     //
     // Fact: it is on a standard FFC. The extension FFC has no SPI
     // (torabo-tsuki_ext_FW/firmware-builder/PATTERN-MATRIX.md rule 2, "No
@@ -318,18 +453,25 @@ export function deriveModuleLayout(
     } else {
       // Central unknown (no LED module to ask), or something is already on that
       // connector — one connector, one device, so the inference has just been
-      // contradicted. Fall back to naming it without a position.
+      // contradicted (or, new to 2026-09-04, that connector was declared
+      // `None`). Fall back to naming it without a position.
       unplaced.push({ key: "fw.mod.trackball" });
     }
   }
 
-  // --- 4. the encoder, by elimination ---------------------------------------
-  // The encoder module has no placement anywhere in caps or on its own wire
-  // (src/encoder/encConfig.ts: magic, version, layerCount, bindings). But it
-  // has to be SOMEWHERE, and there are only four somewheres — so rule out the
-  // cells that are already taken and see what is left. One survivor is an
-  // answer; two are a guess, and stay one.
-  if (hasFeature(caps, Feature.Encoder) && !placedKinds.has(TpKind.Encoder)) {
+  // --- 5. the encoder, when no slot declared one ------------------------------
+  if (
+    hasFeature(caps, Feature.Encoder) &&
+    !placedKinds.has(TpKind.Encoder) &&
+    !declaredKinds.has(ModuleKind.Encoder)
+  ) {
+    // Older firmware (or a build that leaves every slot Undeclared): fall
+    // back to the pre-2026-09-04 elimination. The encoder module has no
+    // placement anywhere in caps or on its own wire (src/encoder/encConfig.ts:
+    // magic, version, layerCount, bindings). But it has to be SOMEWHERE, and
+    // there are only four somewheres — so rule out the cells that are already
+    // taken (by a device, or by a declared pad/ball/None) and see what is
+    // left. One survivor is an answer; two are a guess, and stay one.
     const candidates = vacantCells(occupied);
     if (candidates.length === 1) {
       cellAt(candidates[0].side, candidates[0].conn).items.push({

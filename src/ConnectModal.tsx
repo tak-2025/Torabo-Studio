@@ -6,9 +6,12 @@ import type { AvailableDevice } from "./backends";
 import { Bluetooth, Languages, RefreshCw } from "lucide-react";
 import { Key, ListBox, ListBoxItem, Selection } from "react-aria-components";
 import { useModalRef } from "./misc/useModalRef";
-import { ExternalLink } from "./misc/ExternalLink";
 import { GenericModal } from "./GenericModal";
 import { LANGS, useI18n } from "./i18n";
+// The "no transports at all" advice is platform-specific (Studio points at
+// Web Serial/Web Bluetooth support; the Android shell has its own content) —
+// see platform/transports.tsx's header comment for why this is the seam.
+import { noTransportsAdvice } from "./platform/transports";
 
 export type TransportFactory = {
   label: string;
@@ -233,7 +236,7 @@ function simpleDevicePicker(
   let connections = transports.map((t) => (
     <li key={t.label} className="list-none flex flex-col gap-1 max-w-44">
       <button
-        className="bg-base-300 hover:bg-primary hover:text-primary-content rounded px-2 py-1"
+        className="bg-base-300 hover:bg-primary hover:text-primary-content rounded px-2 py-1 pointer-coarse:px-4 pointer-coarse:py-3"
         type="button"
         onClick={async () => setSelectedTransport({ transport: t })}
       >
@@ -268,7 +271,10 @@ function simpleDevicePicker(
           {availableDevices.map((d) => (
             <li
               key={d.id}
-              className="m-1 p-1"
+              // Picking a device is the whole point of this modal on Android, and
+              // `p-1` around one line of text is a ~28px row. Give it a 44px tap
+              // target on touch (PLAN.md stage 4).
+              className="m-1 p-1 pointer-coarse:flex pointer-coarse:min-h-11 pointer-coarse:items-center pointer-coarse:px-2 pointer-coarse:cursor-pointer"
               onClick={async () => {
                 onTransportCreated(
                   await selectedTransport!.pick_and_connect!.connect(d),
@@ -282,38 +288,6 @@ function simpleDevicePicker(
           ))}
         </ul>
       )}
-    </div>
-  );
-}
-
-function noTransportsOptionsPrompt(tr: (key: string) => string) {
-  return (
-    <div className="m-4 flex flex-col gap-2">
-      <p>
-        {tr("connect.unsupportedPre")}
-        <ExternalLink href="https://caniuse.com/web-serial">
-          Web Serial
-        </ExternalLink>
-        {tr("connect.unsupportedMid")}
-        <ExternalLink href="https://caniuse.com/web-bluetooth">
-          Web Bluetooth
-        </ExternalLink>
-        {tr("connect.unsupportedPost")}
-      </p>
-
-      <div>
-        <p>{tr("connect.toUse")}</p>
-        <ul className="list-disc list-inside">
-          <li>{tr("connect.useBrowser")}</li>
-          <li>
-            {tr("connect.downloadPre")}
-            <ExternalLink href={`${import.meta.env.BASE_URL}download.html`}>
-              {tr("connect.downloadLink")}
-            </ExternalLink>
-            {tr("connect.downloadPost")}
-          </li>
-        </ul>
-      </div>
     </div>
   );
 }
@@ -353,12 +327,13 @@ export const ConnectModal = ({
       {/* The header's language button is behind this dialog, and a modal
           <dialog> makes everything behind it inert — so before connecting there
           was no way to change language at all. This is that button, close
-          enough in look and behaviour that it reads as the same control. */}
+          enough in look and behaviour that it reads as the same control.
+          pointer-coarse: matches the tap targets the rest of this build uses. */}
       <div className="flex items-start justify-between gap-4">
         <h1 className="text-xl">{t("connect.welcome")}</h1>
         <button
           type="button"
-          className="flex shrink-0 items-center gap-1 rounded p-1.5 hover:bg-base-300"
+          className="flex shrink-0 items-center gap-1 rounded p-1.5 hover:bg-base-300 pointer-coarse:p-2.5"
           title={t("lang.label")}
           onClick={() =>
             setLang(
@@ -380,7 +355,7 @@ export const ConnectModal = ({
       )}
       {haveTransports
         ? connectOptions(transports, onTransportCreated, t, open)
-        : noTransportsOptionsPrompt(t)}
+        : noTransportsAdvice(t)}
       {haveTransports && haveUsb && (
         <p className="mt-3 text-xs text-base-content/60 leading-snug">
           {t("connect.note.usbExclusive")}

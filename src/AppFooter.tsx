@@ -11,7 +11,10 @@ export const AppFooter = ({
 }: AppFooterProps) => {
   const t = useT();
   return (
-    <div className="grid justify-center p-1 bg-base-200">
+    // Hidden on a touch screen: a permanent strip of copyright is a strip the
+    // keymap does not get, and the two links it holds are reachable from the
+    // header's ⓘ button instead.
+    <div className="grid justify-center p-1 bg-base-200 pointer-coarse:hidden">
       <div>
         <span>&copy; 2024 - The ZMK Contributors</span> -{" "}
         <a className="hover:text-primary hover:cursor-pointer" onClick={onShowAbout}>

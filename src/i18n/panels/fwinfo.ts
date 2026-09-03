@@ -49,6 +49,7 @@ export const ja: Dict = {
 
   // タブを持たない機能の名前だけ（他はタブ名 tab.* をそのまま使います）
   "fw.feat.reservedLayers": "予約レイヤー",
+  "fw.feat.modules": "モジュール構成",
   "fw.feat.liveFeed": "ライブ表示",
   "fw.feat.rpcTunnel": "RPCトンネル",
   "fw.feat.unknown": "{id}（不明な機能）",
@@ -64,11 +65,34 @@ export const ja: Dict = {
   "fw.val.tpDevices": "パッド {value} 台分",
   "fw.val.layers": "{value} レイヤー",
 
+  // Feature.Modules（機能一覧テーブルの「対応内容」列）。4接続 × 4種類を
+  // 「接続位置: 種類」の形でそのままバッジにするため、組み立てずに16個
+  // 焼き込みます（他の caps ビットと同じ「1ビット=1キー」の流儀）。
+  "fw.mod.slot.leftStd.pad": "左標準: パッド",
+  "fw.mod.slot.leftStd.ball": "左標準: ボール",
+  "fw.mod.slot.leftStd.encoder": "左標準: エンコーダ",
+  "fw.mod.slot.leftStd.none": "左標準: なし",
+  "fw.mod.slot.leftExt.pad": "左拡張: パッド",
+  "fw.mod.slot.leftExt.ball": "左拡張: ボール",
+  "fw.mod.slot.leftExt.encoder": "左拡張: エンコーダ",
+  "fw.mod.slot.leftExt.none": "左拡張: なし",
+  "fw.mod.slot.rightStd.pad": "右標準: パッド",
+  "fw.mod.slot.rightStd.ball": "右標準: ボール",
+  "fw.mod.slot.rightStd.encoder": "右標準: エンコーダ",
+  "fw.mod.slot.rightStd.none": "右標準: なし",
+  "fw.mod.slot.rightExt.pad": "右拡張: パッド",
+  "fw.mod.slot.rightExt.ball": "右拡張: ボール",
+  "fw.mod.slot.rightExt.encoder": "右拡張: エンコーダ",
+  "fw.mod.slot.rightExt.none": "右拡張: なし",
+
   // モジュール構成。左右の見出しと「標準FFC」「トラックパッド」等は
   // trackpad パネルのキー（tp.side.* / tp.conn.standard / tp.kind.*）を
   // そのまま使い回しています。ここで定義するのは、この画面にしかない語だけ。
   "fw.mod.title": "モジュール構成",
-  "fw.mod.desc": "FW情報から推定しています。",
+  // FW が phase9 ビットで申告済みの項目は実線バッジ（申告どおり）、
+  // 申告が無い（0）項目は破線バッジ（推定）で区別して並べて表示するため、
+  // 「推定しています」だけでは全項目申告済みのキーボードで嘘になる。
+  "fw.mod.desc": "FWの申告と推定を組み合わせて表示しています。",
   // 推定で置いたものの見せ方。FW が meta バイトで申告した位置と、こちらで
   // 推論した位置を、同じ見た目で並べないための札。
   "fw.mod.inferredLabel": "{item}（推定）",
@@ -86,6 +110,10 @@ export const ja: Dict = {
   "fw.mod.sideRole": "{side}（{role}）",
   "fw.mod.extBase": "拡張基盤あり",
   "fw.mod.led": "LED基盤",
+  // Feature.Modules がこの接続を「なし（4）」と申告したときのマス表示。
+  // 「申告なし」の空欄（—）とは違い、積極的に「ここには何もない」と
+  // 言っている状態なので、推定を持ち込ませないための専用の見た目にします。
+  "fw.mod.none": "なし",
   "fw.mod.unplacedTitle": "位置が報告されていないモジュール",
   "fw.mod.trackball":
     "トラックボール（標準FFC接続。左右どちらかは FW 未報告）",
@@ -138,6 +166,7 @@ export const en: Dict = {
   "fw.gain.trackpad.coast": "Inertial scroll (coasting)",
 
   "fw.feat.reservedLayers": "Reserved layers",
+  "fw.feat.modules": "Modules",
   "fw.feat.liveFeed": "Live feed",
   "fw.feat.rpcTunnel": "RPC tunnel",
   "fw.feat.unknown": "{id} (unknown feature)",
@@ -152,8 +181,33 @@ export const en: Dict = {
   "fw.val.tpDevices": "{value} pad(s) on the wire",
   "fw.val.layers": "{value} layer(s)",
 
+  // Feature.Modules (the "Capabilities" column of the feature table). Four
+  // connectors x four kinds, baked as "position: kind" rather than composed
+  // at runtime — the same one-bit-one-key convention every other caps badge
+  // here uses.
+  "fw.mod.slot.leftStd.pad": "Left standard: Pad",
+  "fw.mod.slot.leftStd.ball": "Left standard: Ball",
+  "fw.mod.slot.leftStd.encoder": "Left standard: Encoder",
+  "fw.mod.slot.leftStd.none": "Left standard: None",
+  "fw.mod.slot.leftExt.pad": "Left extension: Pad",
+  "fw.mod.slot.leftExt.ball": "Left extension: Ball",
+  "fw.mod.slot.leftExt.encoder": "Left extension: Encoder",
+  "fw.mod.slot.leftExt.none": "Left extension: None",
+  "fw.mod.slot.rightStd.pad": "Right standard: Pad",
+  "fw.mod.slot.rightStd.ball": "Right standard: Ball",
+  "fw.mod.slot.rightStd.encoder": "Right standard: Encoder",
+  "fw.mod.slot.rightStd.none": "Right standard: None",
+  "fw.mod.slot.rightExt.pad": "Right extension: Pad",
+  "fw.mod.slot.rightExt.ball": "Right extension: Ball",
+  "fw.mod.slot.rightExt.encoder": "Right extension: Encoder",
+  "fw.mod.slot.rightExt.none": "Right extension: None",
+
   "fw.mod.title": "Module layout",
-  "fw.mod.desc": "Estimated from what the firmware reports.",
+  // Items the firmware declared via Feature.Modules render as a solid badge
+  // (reported); items with nothing declared (0) still fall back to a dashed,
+  // estimated badge — "estimated" alone would misdescribe a keyboard where
+  // everything is declared.
+  "fw.mod.desc": "Combines what the firmware declares with what this app infers.",
   "fw.mod.inferredLabel": "{item} (estimated)",
   "fw.mod.inferredHint":
     "The firmware does not report this position — it is deduced from the rest of the configuration.",
@@ -163,6 +217,11 @@ export const en: Dict = {
   "fw.mod.sideRole": "{side} ({role})",
   "fw.mod.extBase": "Extension base fitted",
   "fw.mod.led": "LED board",
+  // The grid cell for a connector Feature.Modules declared explicitly empty
+  // (kind 4). Distinct from an ordinary blank cell — this is a positive
+  // "nothing here", so it gets its own subdued marker rather than the plain
+  // dash, and it must not be confused with an estimate.
+  "fw.mod.none": "None",
   "fw.mod.unplacedTitle": "Modules with no reported position",
   "fw.mod.trackball":
     "Trackball (on a standard FFC; the firmware does not report which half)",

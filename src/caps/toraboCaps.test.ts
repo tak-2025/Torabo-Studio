@@ -13,13 +13,16 @@ import {
   CAPS_DESC_VERSION,
   CAPS_HDR,
   CAPS_FEAT,
+  CapsSide,
   Feature,
   LedCap,
   MACRO_NAMES_WIRE_VER,
+  ModuleKind,
   TimingCap,
   TrackballCap,
   TrackpadCap,
   canWriteFeature,
+  centralSideFromHeader,
   decodeCaps,
   hasFeature,
   featureInfo,
@@ -29,6 +32,7 @@ import {
   hasTrackpadCoast,
   hasTrackballCoast,
   ledSides,
+  moduleSlots,
 } from "./toraboCaps";
 import { ZTC_VERSION } from "../trackball/ztcConfig";
 import { TP_VERSION } from "../trackpad/tpConfigV2";
@@ -41,10 +45,12 @@ import { CB_VERSION } from "../dynamic_combos/comboConfig";
 function buildCaps(
   features: { id: number; wireVer: number; caps: number }[],
   fw = { major: 0, minor: 5, patch: 0 },
-  /** Descriptor revision, and bytes parked after the feature table — the two
-   * things a future firmware is allowed to change (see the forward-compat
-   * contract in toraboCaps.ts). Default to today's v1 with nothing trailing. */
-  opts: { descVer?: number; trailing?: number[] } = {},
+  /** Descriptor revision, bytes parked after the feature table, and the
+   * header `_rsv` byte (bit0-1 = central side, PLAN-ext-fw-refactor.md
+   * フェーズ9) — the things a firmware is allowed to set beyond the feature
+   * table itself (see the forward-compat contract in toraboCaps.ts). Default
+   * to today's v1, nothing trailing, `_rsv` 0x00 (every pre-phase9 build). */
+  opts: { descVer?: number; trailing?: number[]; hdrRsv?: number } = {},
 ): Uint8Array {
   const trailing = opts.trailing ?? [];
   const buf = new Uint8Array(CAPS_HDR + features.length * CAPS_FEAT + trailing.length);
@@ -55,6 +61,7 @@ function buildCaps(
   dv.setUint8(4, fw.minor);
   dv.setUint8(5, fw.patch);
   dv.setUint8(6, features.length);
+  dv.setUint8(7, opts.hdrRsv ?? 0x00);
   features.forEach((f, i) => {
     const o = CAPS_HDR + i * CAPS_FEAT;
     dv.setUint8(o, f.id);
@@ -144,12 +151,12 @@ describe("Feature: LiveFeed / RpcTunnel (ids 8 and 9)", () => {
  */
 describe("decodeCaps: tolerance of a newer descriptor", () => {
   /** An id no Feature member has — a feature added after this app shipped.
-   * (8 and 9 are LIVE_FEED / RPC_TUNNEL in caps.h; both are modelled now as
-   * Feature.LiveFeed / Feature.RpcTunnel, so 11+ are the ones this app
-   * genuinely cannot know.) */
+   * (8 and 9 are LIVE_FEED / RPC_TUNNEL in caps.h, and 11 is TORABO_FEAT_MODULES
+   * — all three are modelled now as Feature.LiveFeed / Feature.RpcTunnel /
+   * Feature.Modules, so 12+ are the ones this app genuinely cannot know.) */
   const asFeature = (id: number) => id as Feature;
-  const UNKNOWN_A = 11;
-  const UNKNOWN_B = 12;
+  const UNKNOWN_A = 12;
+  const UNKNOWN_B = 13;
 
   /** 12 entries: every id this app knows, plus four it does not. */
   const futureBlob = buildCaps(
@@ -164,8 +171,8 @@ describe("decodeCaps: tolerance of a newer descriptor", () => {
       { id: Feature.Timing, wireVer: 1, caps: TimingCap.SplitDebounce },
       { id: UNKNOWN_A, wireVer: 1, caps: 0x0001 },
       { id: UNKNOWN_B, wireVer: 7, caps: 0xffff },
-      { id: 13, wireVer: 1, caps: 0 },
       { id: 14, wireVer: 1, caps: 0 },
+      { id: 15, wireVer: 1, caps: 0 },
     ],
     { major: 1, minor: 0, patch: 0 },
     { descVer: 2 },
@@ -424,5 +431,129 @@ describe("canWriteFeature", () => {
     );
     expect(hasFeature(caps, Feature.Trackball)).toBe(true);
     expect(canWriteFeature(caps, Feature.Trackball)).toBe(false);
+  });
+});
+
+/**
+ * Module-layout declaration: the header `_rsv` bit0-1 says which half is
+ * central, and Feature.Modules (id 11, TORABO_FEAT_MODULES, redesigned
+ * 2026-09-04) says what is on each of the four connectors. This superseded a
+ * one-day-lived per-feature scheme (PLAN-ext-fw-refactor.md フェーズ9,
+ * 2026-09-03's TrackballCap.BallLeft/BallRight and EncoderCap.LeftStd/
+ * LeftExt/RightStd/RightExt) — that scheme is gone from both this app and
+ * caps.h, so there is nothing here to test compatibility against.
+ */
+describe("module-layout declaration bits", () => {
+  describe("central side (header _rsv, bit0-1)", () => {
+    it("defaults to Unknown when _rsv is 0x00, matching every pre-phase9 descriptor", () => {
+      const caps = decodeCaps(buildCaps([{ id: Feature.Timing, wireVer: 1, caps: 0 }]));
+      expect(caps.hdrCentralSide).toBe(CapsSide.Unknown);
+      expect(centralSideFromHeader(caps)).toBe(CapsSide.Unknown);
+    });
+
+    it("reads Left / Right from _rsv bit0-1", () => {
+      const left = decodeCaps(
+        buildCaps([{ id: Feature.Timing, wireVer: 1, caps: 0 }], undefined, {
+          hdrRsv: 0x01,
+        }),
+      );
+      expect(left.hdrCentralSide).toBe(CapsSide.Left);
+      expect(centralSideFromHeader(left)).toBe(CapsSide.Left);
+
+      // The real device's actual central (memory: central = right hand).
+      const right = decodeCaps(
+        buildCaps([{ id: Feature.Timing, wireVer: 1, caps: 0 }], undefined, {
+          hdrRsv: 0x02,
+        }),
+      );
+      expect(right.hdrCentralSide).toBe(CapsSide.Right);
+      expect(centralSideFromHeader(right)).toBe(CapsSide.Right);
+    });
+
+    it("masks off bits above bit1, so a stray high bit does not corrupt the reading", () => {
+      // bit0-1 = 0b10 (Right), plus an unrelated high bit some future _rsv use
+      // might set — contract rule (c) parks new header info here too, and this
+      // decode must not let that bleed into the side reading.
+      const caps = decodeCaps(
+        buildCaps([{ id: Feature.Timing, wireVer: 1, caps: 0 }], undefined, {
+          hdrRsv: 0x82,
+        }),
+      );
+      expect(caps.hdrCentralSide).toBe(CapsSide.Right);
+    });
+
+    it("centralSideFromHeader fails closed on pre-capabilities firmware", () => {
+      expect(centralSideFromHeader(null)).toBe(CapsSide.Unknown);
+    });
+  });
+
+  /**
+   * moduleSlots() decodes Feature.Modules' caps u16: 4-bit nibbles, low to
+   * high = left standard / left extension / right standard / right
+   * extension, each 0=undeclared, 1=pad, 2=ball, 3=encoder, 4=none
+   * (ModuleKind). The golden word below is the user's real hardware: an
+   * encoder on left standard, a pad on left extension, a ball on right
+   * standard, a pad on right extension.
+   *
+   *   leftStd=Encoder(3) | leftExt=Pad(1)<<4 | rightStd=Ball(2)<<8 |
+   *   rightExt=Pad(1)<<12
+   *     = 0x0003 | 0x0010 | 0x0200 | 0x1000 = 0x1213
+   */
+  describe("moduleSlots (Feature.Modules caps word, TORABO_FEAT_MODULES)", () => {
+    const GOLDEN_CAPS = 0x1213;
+
+    it("golden: 0x1213 decodes to encoder/pad/ball/pad", () => {
+      const caps = decodeCaps(
+        buildCaps([{ id: Feature.Modules, wireVer: 1, caps: GOLDEN_CAPS }]),
+      );
+      expect(featureInfo(caps, Feature.Modules)?.caps).toBe(GOLDEN_CAPS);
+      expect(moduleSlots(caps)).toEqual({
+        leftStd: ModuleKind.Encoder,
+        leftExt: ModuleKind.Pad,
+        rightStd: ModuleKind.Ball,
+        rightExt: ModuleKind.Pad,
+      });
+    });
+
+    it("golden bytes: the Modules row is id=11, wireVer=1, caps 0x1213 little-endian", () => {
+      // Byte-exact check of the same golden word, straight off the buffer
+      // buildCaps() produced — this is what the firmware side's own encoder
+      // must match byte for byte for the two to agree on the wire.
+      const blob = buildCaps([{ id: Feature.Modules, wireVer: 1, caps: GOLDEN_CAPS }]);
+      const entry = blob.subarray(CAPS_HDR, CAPS_HDR + CAPS_FEAT);
+      expect(Array.from(entry)).toEqual([Feature.Modules, 1, 0x13, 0x12]);
+    });
+
+    it("a present row with every nibble 0 decodes to four Undeclared slots (not null)", () => {
+      // Distinct from an absent row: the firmware COULD have declared
+      // placement and chose not to (CONFIG_TORABO_MODULE_* left unset), vs.
+      // firmware that predates the row entirely (next test).
+      const caps = decodeCaps(buildCaps([{ id: Feature.Modules, wireVer: 1, caps: 0x0000 }]));
+      expect(moduleSlots(caps)).toEqual({
+        leftStd: ModuleKind.Undeclared,
+        leftExt: ModuleKind.Undeclared,
+        rightStd: ModuleKind.Undeclared,
+        rightExt: ModuleKind.Undeclared,
+      });
+    });
+
+    it("decodes an explicit None (4) slot alongside declared ones", () => {
+      // rightExt = None(4)<<12 = 0x4000, layered on the golden leftStd/leftExt/
+      // rightStd above (0x0213) to prove None decodes independently of its
+      // neighbours.
+      const caps = decodeCaps(
+        buildCaps([{ id: Feature.Modules, wireVer: 1, caps: 0x0213 | 0x4000 }]),
+      );
+      expect(moduleSlots(caps)?.rightExt).toBe(ModuleKind.None);
+    });
+
+    it("returns null when the row is absent entirely (older firmware)", () => {
+      const caps = decodeCaps(buildCaps([{ id: Feature.Timing, wireVer: 1, caps: 0 }]));
+      expect(moduleSlots(caps)).toBeNull();
+    });
+
+    it("fails closed with no descriptor at all", () => {
+      expect(moduleSlots(null)).toBeNull();
+    });
   });
 });
