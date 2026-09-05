@@ -205,3 +205,40 @@ export function encodeZtc(cfg: ZtcConfig): Uint8Array {
   }
   return buf;
 }
+
+/**
+ * Re-shape a config that came from a FILE so it fits the keyboard in front of
+ * us right now.
+ *
+ * The wire's length is `8 + 12 * ZMK_KEYMAP_LAYERS_LEN (+ 4)`, i.e. it is bound
+ * to the layer count of the keyboard that produced it — and the firmware's
+ * `ztc_apply_wire` (features/trackball/src/config_state.c) demands an EXACT
+ * length match, so a wire from a board with a different layer count is rejected
+ * outright. That is not a rare cross-device case: adding reserved layers (the
+ * torabo-reserved-layers snippet) raises ZMK_KEYMAP_LAYERS_LEN on the SAME
+ * keyboard, which is what makes an old backup unrestorable after a firmware
+ * update. Hence restore re-encodes rather than writing the file's bytes.
+ *
+ * `live` is the config just read off the keyboard, and it is what decides the
+ * SHAPE of the result:
+ *   - layers: one per layer the keyboard has. The file fills them in order; a
+ *     layer the file does not reach keeps what the keyboard has now (never a
+ *     silent reset), and layers past the keyboard's count are dropped.
+ *   - hasCoast: the firmware's answer, not the file's — encode always answers
+ *     in the version the keyboard speaks (see the file header). A v2 file
+ *     restored onto v3 firmware therefore keeps the keyboard's current coast
+ *     settings rather than forcing them off, because a v2 wire never carried an
+ *     opinion about coasting in the first place.
+ *   - tempTarget: the file's, unless it names a layer this keyboard does not
+ *     have (the firmware would silently substitute its own fallback).
+ */
+export function reshapeZtc(file: ZtcConfig, live: ZtcConfig): ZtcConfig {
+  const layers = live.layers.map((l, i) => file.layers[i] ?? l);
+  return {
+    layers,
+    tempTarget: file.tempTarget < layers.length ? file.tempTarget : live.tempTarget,
+    tempTimeoutMs: file.tempTimeoutMs,
+    coast: file.hasCoast ? file.coast : live.coast,
+    hasCoast: live.hasCoast,
+  };
+}

@@ -35,6 +35,7 @@ import {
   defaultCoast,
   clampCoastFriction,
   clampCoastThreshold,
+  reshapeZtc,
   type ZtcConfig,
 } from "./ztcConfig";
 
@@ -220,5 +221,84 @@ describe("coast clamps", () => {
   it("clampCoastFriction/Threshold fall back to the default when unset (<=0)", () => {
     expect(clampCoastFriction(0)).toBe(ZTC_COAST_FRICTION_DEFAULT);
     expect(clampCoastThreshold(0)).toBe(ZTC_COAST_THRESHOLD_DEFAULT);
+  });
+});
+
+/**
+ * Restoring a backup onto a keyboard whose LAYER COUNT has changed.
+ *
+ * The wire is 8 + 12*N (+4), and torabo-tsuki_ext_FW's ztc_apply_wire refuses
+ * anything but an exact length match, so the file's bytes are unwritable the
+ * moment N moves. N moves on the SAME keyboard: with CONFIG_ZMK_STUDIO the
+ * reserved layers appended by the torabo-reserved-layers snippet are counted in
+ * ZMK_KEYMAP_LAYERS_LEN (zmk/app/include/zmk/keymap.h), so tako-custom's
+ * build.yaml (-DTORABO_RESERVED_LAYERS=10, on a 10-child keymap) takes N from
+ * 10 to 20 and every backup taken before it stops restoring. reshapeZtc is what
+ * restore uses instead of writing the stored bytes (backup/sections.ts).
+ */
+describe("reshapeZtc — restoring onto a different layer count", () => {
+  const axis = (speedDiv: number) => ({
+    role: Role.Move,
+    reverse: false,
+    speedDiv,
+  });
+  /** `n` layers, each tagged by its index through the X speed divisor. */
+  const cfg = (n: number, over: Partial<ZtcConfig> = {}): ZtcConfig => ({
+    layers: Array.from({ length: n }, (_, i) => ({
+      x: axis(i + 1),
+      y: axis(1),
+      tempEnable: false,
+    })),
+    tempTarget: 1,
+    tempTimeoutMs: 30000,
+    coast: defaultCoast(),
+    hasCoast: true,
+    ...over,
+  });
+
+  it("re-encodes a 10-layer file to the 20-layer wire the keyboard wants", () => {
+    const wire = encodeZtc(reshapeZtc(cfg(10), cfg(20)));
+    // 8 + 12*20 + 4 — exactly what ztc_wire_len() returns for ZTC_MAX_LAYERS=20.
+    expect(wire.length).toBe(ZTC_HDR + 20 * ZTC_LAYER + ZTC_COAST);
+    expect(decodeZtc(wire).layers).toHaveLength(20);
+  });
+
+  it("keeps the file's layers and leaves the keyboard's extra ones alone", () => {
+    const live = cfg(20);
+    live.layers[15].x.speedDiv = 7; // a layer the file never had
+    const out = reshapeZtc(cfg(10), live);
+    expect(out.layers[0].x.speedDiv).toBe(1); // from the file
+    expect(out.layers[9].x.speedDiv).toBe(10); // last layer the file had
+    expect(out.layers[15].x.speedDiv).toBe(7); // untouched on the keyboard
+  });
+
+  it("drops layers the keyboard no longer has", () => {
+    const out = reshapeZtc(cfg(20), cfg(4));
+    expect(out.layers).toHaveLength(4);
+    expect(encodeZtc(out).length).toBe(ZTC_HDR + 4 * ZTC_LAYER + ZTC_COAST);
+  });
+
+  it("answers in the wire version the KEYBOARD speaks, not the file's", () => {
+    // v3 file onto v2-only firmware: encode must still emit v2, or the write is
+    // rejected for a version this firmware never had.
+    const out = reshapeZtc(cfg(10), cfg(10, { hasCoast: false }));
+    expect(out.hasCoast).toBe(false);
+    expect(encodeZtc(out).length).toBe(ZTC_HDR + 10 * ZTC_LAYER);
+  });
+
+  it("keeps the keyboard's coast settings when the file is a v2 wire", () => {
+    // A v2 file carried no opinion about coasting, so forcing the firmware's
+    // engine off would be inventing one.
+    const live = cfg(10, { coast: { enable: true, friction: 4, threshold: 30 } });
+    const file = cfg(10, { hasCoast: false, coast: defaultCoast() });
+    expect(reshapeZtc(file, live).coast).toEqual(live.coast);
+  });
+
+  it("drops a temp_target the keyboard has no layer for", () => {
+    // The firmware would substitute its own fallback silently; keeping what the
+    // keyboard already has is the honest answer.
+    const out = reshapeZtc(cfg(20, { tempTarget: 17 }), cfg(4, { tempTarget: 2 }));
+    expect(out.tempTarget).toBe(2);
+    expect(reshapeZtc(cfg(20, { tempTarget: 3 }), cfg(4)).tempTarget).toBe(3);
   });
 });

@@ -46,6 +46,7 @@ import {
   decodeTp,
   tpFirmwareReadbackSize,
 } from "../trackpad/tpConfigV2";
+import { decodeZtc, encodeZtc, reshapeZtc } from "../trackball/ztcConfig";
 
 /** Keys in BackupFile that hold a base64 wire blob. */
 export type SectionKey =
@@ -104,7 +105,9 @@ export interface BackupSection {
    * the question is "can the APP read this file", not "is the file newer than
    * the firmware". See restoreBlock (b).
    *
-   * Set on macros. Combos has the same decode-and-replay shape
+   * Set on macros (per-slot re-encode) and on the trackball (whole-wire
+   * re-encode, because the wire's LENGTH is tied to the source keyboard's layer
+   * count — see trackballRestore). Combos has the same decode-and-replay shape
    * (restoreBackup.ts writes them with encodeSlot per slot) and would want this
    * flag the day its wire gains a v2 — deliberately NOT set today, because
    * combos has only ever had v1 and the flag would change nothing except which
@@ -170,6 +173,27 @@ export function trackpadReadbackBlock(
   return { key: "bk.skip.tpReadbackTooBig", vars: { size, max: budget } };
 }
 
+/**
+ * Restore the trackball section by RE-ENCODING it for this keyboard, not by
+ * handing back the file's bytes.
+ *
+ * The ztc wire is `8 + 12 * ZMK_KEYMAP_LAYERS_LEN (+ 4 in v3)` bytes and the
+ * firmware checks that length EXACTLY (`ztc_apply_wire`, len != want =>
+ * -EINVAL), so the stored wire is only writable to a keyboard whose layer count
+ * still matches the one it was taken from. That is not just a cross-device
+ * concern: turning on reserved layers (the torabo-reserved-layers snippet)
+ * raises ZMK_KEYMAP_LAYERS_LEN on the same keyboard, and every backup taken
+ * before that becomes unrestorable — the section fails with a raw
+ * "value not allowed" from the config service and nothing says why.
+ *
+ * Reading the keyboard first is what makes the re-encode possible: `live` is
+ * where the target's layer count and wire version come from. See reshapeZtc.
+ */
+async function trackballRestore(blob: Uint8Array): Promise<void> {
+  const live = decodeZtc(await trackballReadConfig());
+  await trackballWriteConfig(encodeZtc(reshapeZtc(decodeZtc(blob), live)));
+}
+
 export const BACKUP_SECTIONS: BackupSection[] = [
   {
     key: "trackball",
@@ -177,7 +201,10 @@ export const BACKUP_SECTIONS: BackupSection[] = [
     feature: Feature.Trackball,
     wireVerOffset: 2,
     read: trackballReadConfig,
-    write: trackballWriteConfig,
+    write: trackballRestore,
+    // Re-encoded, never replayed verbatim — see trackballRestore above and the
+    // flag's own doc comment.
+    replayDecoded: true,
   },
   // Restored one slot at a time (see the panel) — no `write` here.
   {

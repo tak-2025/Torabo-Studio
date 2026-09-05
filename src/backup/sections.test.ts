@@ -121,11 +121,33 @@ describe("restoreBlock", () => {
   });
 
   it("blocks a blob newer than the firmware it is being restored onto", () => {
-    // A v3 trackball blob taken off a newer keyboard, onto v2-only firmware.
-    const fw = caps([{ id: Feature.Trackball, wireVer: 2 }]);
-    expect(restoreBlock(trackball, blob(2, 3), fw)).toEqual({
+    // A v3 trackpad blob taken off a newer keyboard, onto v2-only firmware.
+    // Trackpad is a RAW-blob section: the file's bytes are what gets written,
+    // so a file the firmware cannot parse must not be attempted.
+    const fw = caps([{ id: Feature.Trackpad, wireVer: 2 }]);
+    expect(restoreBlock(trackpad, blob(2, 3), fw)).toEqual({
       key: "bk.skip.blobNewerThanFw",
       vars: { file: 3, fw: 2 },
+    });
+  });
+
+  it("lets a newer trackball file onto older firmware — it is re-encoded", () => {
+    // The trackball is replayDecoded (sections.ts, trackballRestore): restore
+    // decodes the file and writes what encodeZtc produces for THIS keyboard, so
+    // a v3 file lands on v2 firmware as a v2 wire. The firmware's own version is
+    // therefore not the question; only whether this app's codec can read the
+    // file is.
+    const fw = caps([{ id: Feature.Trackball, wireVer: 2 }]);
+    expect(restoreBlock(trackball, blob(2, 3), fw)).toBeNull();
+  });
+
+  it("blocks a trackball file this app's codec cannot read", () => {
+    // v4 is past APP_MAX_WIRE_VER[Trackball] (3): decodeZtc would throw, so
+    // there is nothing to re-encode. Reported against the APP, not the firmware.
+    const fw = caps([{ id: Feature.Trackball, wireVer: 3 }]);
+    expect(restoreBlock(trackball, blob(2, 4), fw)).toEqual({
+      key: "bk.skip.blobNewerThanApp",
+      vars: { file: 4, app: 3 },
     });
   });
 
@@ -141,8 +163,15 @@ describe("restoreBlock", () => {
   it("allows everything on pre-capabilities firmware", () => {
     // No descriptor: no wire version to compare against, so restore behaves as
     // it always did — write it and let the firmware validate.
+    expect(restoreBlock(trackpad, blob(2, 3), null)).toBeNull();
+    expect(restoreBlock(trackpad, blob(2, 99), null)).toBeNull();
+    // The trackball's gate does not consult the descriptor at all (it is
+    // replayDecoded), so a readable version is fine and an unreadable one is
+    // still refused — same answer with or without caps.
     expect(restoreBlock(trackball, blob(2, 3), null)).toBeNull();
-    expect(restoreBlock(trackball, blob(2, 99), null)).toBeNull();
+    expect(restoreBlock(trackball, blob(2, 99), null)?.key).toBe(
+      "bk.skip.blobNewerThanApp",
+    );
   });
 
   it("allows a section the descriptor doesn't list", () => {
@@ -270,14 +299,15 @@ describe("restoreBlock", () => {
     ).toBeNull();
   });
 
-  it("relaxes the gate for macros only — every raw-blob section still uses it", () => {
-    // The override is one flag on one row. Everything restore writes verbatim
-    // keeps rule (b), including combos, which has the same decode-and-replay
-    // shape but no v2 to need it yet.
-    expect(SECTION_BY_KEY.macros.replayDecoded).toBe(true);
+  it("relaxes the gate for the re-encoding sections only — raw blobs keep it", () => {
+    // The override is one flag, and it is set exactly on the rows whose bytes
+    // restore does NOT hand to the keyboard: macros (per-slot re-encode) and
+    // the trackball (whole-wire re-encode, sections.ts's trackballRestore).
+    // Everything restore writes verbatim keeps rule (b) — including combos,
+    // which has the same decode-and-replay shape but no v2 to need it yet.
+    const REENCODED = new Set(["macros", "trackball"]);
     for (const s of BACKUP_SECTIONS) {
-      if (s.key === "macros") continue;
-      expect(s.replayDecoded).toBeUndefined();
+      expect(s.replayDecoded ?? false).toBe(REENCODED.has(s.key));
     }
     const fw = caps([{ id: Feature.Combos, wireVer: 1 }]);
     expect(restoreBlock(SECTION_BY_KEY.combos, blob(2, 2), fw)).toEqual({
