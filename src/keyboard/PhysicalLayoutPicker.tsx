@@ -10,6 +10,7 @@ import {
   Text,
 } from "react-aria-components";
 import { PhysicalLayout, type KeyPosition } from "./PhysicalLayout";
+import { keyShapeAt, standardKeyCount } from "./extensionKeys";
 import { useCallback } from "react";
 import { useT } from "../i18n";
 
@@ -78,6 +79,9 @@ export const PhysicalLayoutPicker = ({
                       r: (r || 0) / 100.0,
                       rx: (rx || 0) / 100.0,
                       ry: (ry || 0) / 100.0,
+                      // Same round extension keys as the board itself, so the
+                      // thumbnail matches what picking this layout draws.
+                      shape: keyShapeAt(i, standardKeyCount(l.keys.length)),
                     }),
                   )}
                 />

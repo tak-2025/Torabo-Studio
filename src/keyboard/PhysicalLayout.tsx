@@ -6,12 +6,18 @@ import {
   useState,
 } from "react";
 import { Key } from "./Key";
+import type { KeyShape } from "./extensionKeys";
 
 export type KeyPosition = PropsWithChildren<{
   id: string;
   header?: string;
   hold?: string;
   muted?: boolean;
+  /** "rounded" for the extension positions a torabo-tsuki build appends after
+   *  the standard grid (dial push / 4-direction switch); see extensionKeys.ts.
+   *  Defaults to "rect" — a caller that knows nothing about extension keys
+   *  keeps drawing every position as a keycap. */
+  shape?: KeyShape;
   width: number;
   height: number;
   x: number;

@@ -14,6 +14,22 @@
       "why": "エンコーダー回転用の sensor behavior。キーではなく sensor-bindings に繋がっており、実際の動作はエンコーダータブで編集する"
     },
     {
+      "name": "hires_dial_scroll",
+      "why": "高分解能ダイヤル回転用の sensor behavior（縦スクロール）。キーではなく sensor-bindings 専用で、割り当てても動かない"
+    },
+    {
+      "name": "hires_dial_hscroll",
+      "why": "同上（横スクロール）"
+    },
+    {
+      "name": "hires_dial_radial_controller",
+      "why": "同上（Surface Dial / Radial Controller の回転）。押し込み用は別の hires_dial_radial_controller_button で、そちらはキーに置ける"
+    },
+    {
+      "name": "hires_dial_encoder",
+      "why": "同上（回転を CW/CCW のキーコードに変換）"
+    },
+    {
       "name": "Studio Unlock",
       "why": "この機体は CONFIG_ZMK_STUDIO_LOCKING=n でロック機能自体が無効。押しても何も起きない"
     },

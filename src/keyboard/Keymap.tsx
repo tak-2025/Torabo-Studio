@@ -12,6 +12,7 @@ import { KeyFace } from "./KeyFace";
 import { useKeyLayout } from "./KeyLayoutContext";
 import { useMacroNames } from "../dynamic_macros/MacroNamesContext";
 import { LayerRef, resolveBindingFace } from "./binding-face";
+import { keyShapeAt, standardKeyCount } from "./extensionKeys";
 
 type BehaviorMap = Record<number, GetBehaviorDetailsResponse>;
 
@@ -50,11 +51,17 @@ export const Keymap = ({
     name: name || li.toLocaleString(),
   }));
 
+  // Positions past the standard grid are the dial push / 4-direction switch,
+  // not keycaps — drawn round. null for a layout smaller than any known grid,
+  // which draws every position square, exactly as before.
+  const standard = standardKeyCount(layout.keys.length);
+
   const positions = layout.keys.map((k, i) => {
     if (i >= keymap.layers[selectedLayerIndex].bindings.length) {
       return {
         id: `${keymap.layers[selectedLayerIndex].id}-${i}`,
         header: "Unknown",
+        shape: keyShapeAt(i, standard),
         x: k.x / 100.0,
         y: k.y / 100.0,
         width: k.width / 100,
@@ -74,6 +81,7 @@ export const Keymap = ({
     return {
       id: `${keymap.layers[selectedLayerIndex].id}-${i}`,
       header: behaviors[binding.behaviorId]?.displayName || "Unknown",
+      shape: keyShapeAt(i, standard),
       hold: face.hold,
       muted: face.muted,
       x: k.x / 100.0,

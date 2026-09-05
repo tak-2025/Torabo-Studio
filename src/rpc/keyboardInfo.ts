@@ -1,6 +1,11 @@
 import type { RpcConnection } from "@zmkfirmware/zmk-studio-ts-client";
 
 import { call_rpc } from "./logging";
+import {
+  keyShapeAt,
+  standardKeyCount,
+  type KeyShape,
+} from "../keyboard/extensionKeys";
 
 /**
  * Context the config panels want but the config wire does not carry: layer
@@ -57,6 +62,14 @@ export interface LayoutKey {
   r: number;
   rx: number;
   ry: number;
+  /**
+   * "rounded" for the extension positions a torabo-tsuki build appends after the
+   * standard grid — the dial push and the 4-direction switch (extensionKeys.ts).
+   * Resolved here so each panel does not have to; the field name matches
+   * PhysicalLayout.KeyPosition, so the panels can spread a LayoutKey straight
+   * into a key position, as they already do.
+   */
+  shape: KeyShape;
 }
 
 export async function fetchLayoutKeys(
@@ -67,8 +80,10 @@ export async function fetchLayoutKeys(
     const pl = resp?.keymap?.getPhysicalLayouts;
     const layout = pl?.layouts?.[pl?.activeLayoutIndex || 0];
     if (!layout) return null;
+    const standard = standardKeyCount(layout.keys.length);
+
     // The wire carries hundredths; the panels draw in whole units.
-    return layout.keys.map((k) => ({
+    return layout.keys.map((k, i) => ({
       x: k.x / 100,
       y: k.y / 100,
       width: k.width / 100,
@@ -76,6 +91,7 @@ export async function fetchLayoutKeys(
       r: (k.r || 0) / 100,
       rx: (k.rx || 0) / 100,
       ry: (k.ry || 0) / 100,
+      shape: keyShapeAt(i, standard),
     }));
   } catch (e) {
     console.warn("physical layout fetch skipped:", e);

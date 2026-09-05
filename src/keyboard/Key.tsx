@@ -1,5 +1,6 @@
 import { PropsWithChildren } from "react";
 import BehaviorShortNames from "./behavior-short-names.json";
+import type { KeyShape } from "./extensionKeys";
 
 interface KeyProps {
   selected?: boolean;
@@ -16,6 +17,13 @@ interface KeyProps {
    *  are the background of a layer, not part of what it does, and at a glance
    *  the eye should skip them to find the keys that matter. */
   muted?: boolean;
+  /** Draw the key with a larger corner radius than a normal key. Used for the
+   *  positions a torabo-tsuki build appends after the standard grid — the dial
+   *  push and the 4-direction switch (see extensionKeys.ts). They are bindable
+   *  key positions like any other, so everything else — the legend, selection,
+   *  hover, the click that opens the binding editor — is unchanged; only the
+   *  outline says "this one is not a keycap". */
+  shape?: KeyShape;
   onClick?: () => void;
 }
 
@@ -51,6 +59,7 @@ export const Key = ({
   header,
   hold,
   muted = false,
+  shape = "rect",
   onClick,
   children,
 }: PropsWithChildren<KeyProps>) => {
@@ -63,7 +72,7 @@ export const Key = ({
 
   return (
     <button
-      className={`group rounded relative flex justify-center items-center cursor-pointer transition-all hover:shadow-xl hover:ring-1 hover:ring-gray-300 hover:scale-125 ${selected
+      className={`group ${shape === "rounded" ? "rounded-xl" : "rounded"} relative flex justify-center items-center cursor-pointer transition-all hover:shadow-xl hover:ring-1 hover:ring-gray-300 hover:scale-125 ${selected
           ? "bg-primary text-primary-content"
           : muted
             ? "bg-base-200 text-base-content/40"
