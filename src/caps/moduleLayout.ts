@@ -9,16 +9,20 @@
  *   1. The header's `_rsv` byte and Feature.Modules' caps word
  *      (caps.h's TORABO_CAPS_HDR_CENTRAL_MASK / TORABO_FEAT_MODULES,
  *      redesigned 2026-09-04, superseding the previous day's per-feature
- *      TrackballCap/EncoderCap side-bit scheme). A builder that opts in
- *      DECLARES which half is central, and — in ONE unified caps word rather
- *      than one per feature — what each of the four connectors carries: a
- *      pad, a ball, an encoder, or explicitly nothing (ModuleKind,
- *      toraboCaps.ts). Every slot independent, so any mix is expressible: a
- *      ball on one standard module and nothing declared on the other, an
- *      encoder on all four connectors, etc. An unset Kconfig (every
- *      pre-2026-09-04 build, and any build that leaves a slot unconfigured)
- *      reports that slot as 0 = Undeclared, which is indistinguishable from
- *      "not declared" — hence the per-slot inference fallback below.
+ *      TrackballCap/EncoderCap side-bit scheme; slot numbering renumbered
+ *      again 2026-09-05, see ModuleKind in toraboCaps.ts). A builder that
+ *      opts in DECLARES which half is central, and — in ONE unified caps word
+ *      rather than one per feature — what each of the four connectors
+ *      carries: a ball, a pad, a 4-way switch module, a hi-res dial, an
+ *      encoder, or explicitly nothing (ModuleKind, toraboCaps.ts). Every slot
+ *      independent, so any mix is expressible: a ball on one standard module
+ *      and nothing declared on the other, an encoder on all four connectors,
+ *      etc. An unset Kconfig (every pre-2026-09-04 build, and any build that
+ *      leaves a slot unconfigured) reports that slot as 0 = Undeclared, which
+ *      is indistinguishable from "not declared" — hence the per-slot
+ *      inference fallback below. A slot value ModuleKind does not define
+ *      (5-8, 10-14) is likewise treated as if it were Undeclared for
+ *      placement purposes — see step 3.
  *
  *   2. The LED caps bits (TORABO_CAPS_LED_LEFT / _RIGHT / _CENTRAL_IS_LEFT in
  *      caps.h). They say which halves have an LED extension board, and — the
@@ -35,10 +39,15 @@
  *      TP_META_*). This is the authoritative placement: side, connector and
  *      kind, straight from the build's Kconfig. It covers only devices on that
  *      wire, and firmware older than the meta byte sends 0 = unknown. Its kind
- *      numbering (TpKind) is deliberately identical to ModuleKind's — the two
- *      channels can name the same physical device, so a cell the wire already
- *      placed a device in and a slot Feature.Modules also declares are
- *      deduped by comparing the numbers directly (see step 4 below).
+ *      numbering (TpKind) is a FROZEN wire contract and, since 2026-09-05, no
+ *      longer numbered the same as ModuleKind's (ModuleKind carries slot
+ *      kinds — FourWaySwitch, Dial — the trackpad wire will never carry).
+ *      The two
+ *      channels can still name the same physical device, so a cell the wire
+ *      already placed a device in and a slot Feature.Modules also declares
+ *      are deduped by converting one numbering to the other via
+ *      moduleKindFromTpKind() (see step 3 below), never by comparing the raw
+ *      numbers.
  *
  * And what none of the three can tell, when a slot is Undeclared (0) and no
  * trackpad-wire device already accounts for it:
@@ -52,12 +61,13 @@
  *     come with a meta byte; that one lands in a cell like any other device.)
  *
  * REPORT VS INFERENCE
- * A slot Feature.Modules declares (1=pad, 2=ball, 3=encoder) is placed as a
- * REPORT — same badge treatment as a trackpad-wire device. A slot declared 4
- * (None) is placed as an explicit, subdued "empty" marker, and — this is the
- * whole reason None exists as a value distinct from Undeclared — blocks any
- * inference from landing in that cell. Only for a slot left at Undeclared (0)
- * does the pre-declaration estimate still apply: the ball onto the central's
+ * A slot Feature.Modules declares to a defined, non-"none" ModuleKind (Ball,
+ * Pad, FourWaySwitch, Dial, Encoder) is placed as a REPORT — same badge treatment
+ * as a trackpad-wire device. A slot declared None is placed as an explicit,
+ * subdued "empty" marker, and — this is the whole reason None exists as a
+ * value distinct from Undeclared — blocks any inference from landing in that
+ * cell. Only for a slot left at Undeclared (0), or at a value ModuleKind does
+ * not define, does the pre-declaration estimate still apply: the ball onto the central's
  * standard FFC, the encoder onto whatever single cell is left once the taken
  * ones are ruled out. That estimate is sound only because the section says so
  * (fw.mod.desc) — and only as long as it is not passed off as a report. So
@@ -207,22 +217,81 @@ const CELLS: { side: LayoutSide; conn: LayoutConn }[] = [
 ];
 
 /** Same key set describeDevice() uses in tpConfigV2.ts — one wire, one set of
- * names for the things on it. Also what Feature.Modules' declared slots use to
- * label a cell (step 3 below), since ModuleKind and TpKind share their 1/2/3
- * numbering by design. */
+ * names for the things on it. Keyed by TpKind, so this is only for devices
+ * the trackpad wire itself placed (deviceLabel() below) — a slot
+ * Feature.Modules declares is a different enum (ModuleKind) with different
+ * numbers since 2026-09-05, and uses MODULE_KIND_KEYS instead (step 3). */
 const KIND_KEYS: Record<number, string> = {
   [TpKind.Trackpad]: "tp.kind.trackpad",
   [TpKind.Trackball]: "tp.kind.trackball",
   [TpKind.Encoder]: "tp.kind.encoder",
 };
 
+/**
+ * Bridge between the trackpad wire's own per-device kind (TpKind,
+ * tpConfigV2.ts — a frozen wire contract: Unknown/Trackpad/Trackball/Encoder
+ * = 0/1/2/3) and Feature.Modules' declared slot kind (ModuleKind,
+ * toraboCaps.ts — Undeclared/Ball/Pad/FourWaySwitch/Dial/Encoder/None =
+ * 0/1/2/3/4/9/15, renumbered 2026-09-05 precisely so it no longer has to
+ * match TpKind). The two enums can still describe the very same physical
+ * device on
+ * the very same connector, so step 3 below uses this — not a raw number
+ * comparison — to tell whether a declared slot merely confirms what the wire
+ * already reported, or contradicts it.
+ *
+ * TpKind.Unknown has no ModuleKind counterpart (a device the wire could not
+ * describe carries no kind to compare against) and maps to `undefined`. The
+ * gap runs the other way too, and permanently: ModuleKind.Dial (and
+ * FourWaySwitch) can never be produced here, because neither rides the
+ * trackpad wire — so a declared Dial slot is never deduped against, nor
+ * contradicted by, a wire device.
+ */
+export function moduleKindFromTpKind(kind: TpKind): ModuleKind | undefined {
+  switch (kind) {
+    case TpKind.Trackpad:
+      return ModuleKind.Pad;
+    case TpKind.Trackball:
+      return ModuleKind.Ball;
+    case TpKind.Encoder:
+      return ModuleKind.Encoder;
+    default:
+      return undefined;
+  }
+}
+
+/** Badge key per DECLARED ModuleKind (step 3 below) — a slot Feature.Modules
+ * names, as opposed to KIND_KEYS above which names a device the trackpad
+ * wire itself placed. Ball/Pad/Encoder reuse the trackpad panel's own
+ * tp.kind.* wording, same word for the same kind of device regardless of
+ * which channel reported it. FourWaySwitch and Dial have no trackpad-wire
+ * counterpart (the wire will never carry either), so they get their own keys.
+ * No entry for
+ * Undeclared or None: those are handled separately below (silence, or the
+ * dedicated fw.mod.none marker) rather than through this lookup. */
+const MODULE_KIND_KEYS: Partial<Record<ModuleKind, string>> = {
+  [ModuleKind.Ball]: "tp.kind.trackball",
+  [ModuleKind.Pad]: "tp.kind.trackpad",
+  [ModuleKind.Encoder]: "tp.kind.encoder",
+  [ModuleKind.FourWaySwitch]: "fw.mod.kind.fourWay",
+  [ModuleKind.Dial]: "fw.mod.kind.dial",
+};
+
+/** Every value ModuleKind actually defines. A declared slot outside this set
+ * (5-8, 10-14) is treated exactly like Undeclared for
+ * placement purposes in step 3 — left for the fallback inference in steps 4/5
+ * to consider, never occupying a cell or shown as a report. */
+const KNOWN_MODULE_KINDS = new Set<number>(Object.values(ModuleKind));
+
 /** Where a declared slot goes when it loses a contradiction with the trackpad
  * wire's own report for the same cell (step 3 below) — same "present, but not
  * placeable here" wording the pre-declaration inference falls back to when
- * ITS estimate is contradicted. No entry for Pad: nothing in this app has
- * ever needed to say "a pad exists somewhere unplaceable" outside of what the
- * wire itself already lists in `unplaced`, so a contradicted declared pad is
- * simply dropped rather than inventing a message nothing else uses. */
+ * ITS estimate is contradicted. No entry for Pad, FourWaySwitch or Dial:
+ * nothing in this app has ever needed to say "a pad/4-way switch exists
+ * somewhere unplaceable" outside of what the wire itself already lists in
+ * `unplaced`, and a Dial can never reach this branch at all (it has no
+ * TpKind counterpart, so the wire can never contradict one) — so a
+ * contradicted declared one of those is simply dropped rather than
+ * inventing a message nothing else uses. */
 const MODULE_KIND_UNPLACED_KEY: Partial<Record<number, string>> = {
   [ModuleKind.Ball]: "fw.mod.trackball",
   [ModuleKind.Encoder]: "fw.mod.encoder",
@@ -360,18 +429,22 @@ export function deriveModuleLayout(
 
   // --- 3. Feature.Modules' declared slots -------------------------------------
   // caps.h TORABO_FEAT_MODULES (redesigned 2026-09-04, superseding the
-  // previous day's per-feature TrackballCap/EncoderCap side bits): one
-  // unified caps word, four 4-bit slots, each independently 0=undeclared,
-  // 1=pad, 2=ball, 3=encoder, or 4=explicitly nothing (ModuleKind,
-  // toraboCaps.ts). A declared pad/ball/encoder is a REPORT — same badge
-  // treatment as a device the trackpad wire itself placed, and indeed the
-  // kind numbering is shared with the wire's own meta byte (TpKind) on
-  // purpose, so the two channels naming the SAME device dedupe by comparing
-  // numbers rather than stacking two badges in one cell. A declared "nothing"
-  // (4) is placed as its own subdued marker, and — by being added to
-  // `occupied` like any other placement — automatically blocks both the
-  // trackball and encoder fallback inference below from landing there. An
-  // undeclared slot (0) leaves the cell for that inference to consider.
+  // previous day's per-feature TrackballCap/EncoderCap side bits; slot
+  // numbering renumbered again 2026-09-05): one unified caps word, four
+  // 4-bit slots, each independently 0=undeclared, 1=ball, 2=pad, 3=4-way
+  // switch, 4=hi-res dial, 9=encoder, or 15=explicitly nothing (ModuleKind,
+  // toraboCaps.ts).
+  // A declared ball/pad/4-way/dial/encoder is a REPORT — same badge treatment as a
+  // device the trackpad wire itself placed. The kind numbering no longer
+  // matches the wire's own meta byte (TpKind), so the two channels naming
+  // the SAME device dedupe via moduleKindFromTpKind(), converting the wire's
+  // TpKind into the ModuleKind space before comparing — never by comparing
+  // the raw numbers. A declared "nothing" (None) is placed as its own
+  // subdued marker, and — by being added to `occupied` like any other
+  // placement — automatically blocks both the trackball and encoder fallback
+  // inference below from landing there. An undeclared slot (0), or one set to
+  // a value ModuleKind does not define (5-8, 10-14), leaves the cell for that
+  // inference to consider.
   const slots = moduleSlots(caps);
   const declaredKinds = new Set<number>();
   if (slots) {
@@ -383,8 +456,9 @@ export function deriveModuleLayout(
     ];
     for (const { seat, kind } of bySlot) {
       if (kind === ModuleKind.Undeclared) continue;
+      if (!KNOWN_MODULE_KINDS.has(kind)) continue; // undefined value (5-8, 10-14): treat as undeclared
       const key = cellKey(seat.side, seat.conn);
-      const already = kindAt.get(key);
+      const already = kindAt.get(key); // TpKind, when the wire already placed a device here
 
       if (kind === ModuleKind.None) {
         // Nothing to dedupe against a real device: if the wire already put
@@ -399,7 +473,9 @@ export function deriveModuleLayout(
       }
 
       declaredKinds.add(kind);
-      if (already === kind) continue; // the wire already reported this exact device
+      const alreadyAsModuleKind =
+        already !== undefined ? moduleKindFromTpKind(already as TpKind) : undefined;
+      if (alreadyAsModuleKind === kind) continue; // the wire already reported this exact device
       if (already !== undefined) {
         // A genuine contradiction — the wire reported a DIFFERENT kind here.
         // One connector, one device, so the declared slot loses to the wire's
@@ -409,7 +485,8 @@ export function deriveModuleLayout(
         continue;
       }
       if (seat.conn === TpConn.Extension) extBase[seat.side] = true;
-      cellAt(seat.side, seat.conn).items.push({ key: KIND_KEYS[kind] });
+      const badgeKey = MODULE_KIND_KEYS[kind];
+      if (badgeKey) cellAt(seat.side, seat.conn).items.push({ key: badgeKey });
       occupied.push(seat);
       kindAt.set(key, kind);
     }

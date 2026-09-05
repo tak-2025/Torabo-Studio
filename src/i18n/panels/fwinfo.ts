@@ -65,23 +65,32 @@ export const ja: Dict = {
   "fw.val.tpDevices": "パッド {value} 台分",
   "fw.val.layers": "{value} レイヤー",
 
-  // Feature.Modules（機能一覧テーブルの「対応内容」列）。4接続 × 4種類を
-  // 「接続位置: 種類」の形でそのままバッジにするため、組み立てずに16個
+  // Feature.Modules（機能一覧テーブルの「対応内容」列）。4接続 × 6種類
+  // （パッド/ボール/4方向スイッチ/高分解能ダイヤル/エンコーダ/なし）を
+  // 「接続位置: 種類」の形でそのままバッジにするため、組み立てずに24個
   // 焼き込みます（他の caps ビットと同じ「1ビット=1キー」の流儀）。
   "fw.mod.slot.leftStd.pad": "左標準: パッド",
   "fw.mod.slot.leftStd.ball": "左標準: ボール",
+  "fw.mod.slot.leftStd.fourWay": "左標準: 4方向スイッチ",
+  "fw.mod.slot.leftStd.dial": "左標準: 高分解能ダイヤル",
   "fw.mod.slot.leftStd.encoder": "左標準: エンコーダ",
   "fw.mod.slot.leftStd.none": "左標準: なし",
   "fw.mod.slot.leftExt.pad": "左拡張: パッド",
   "fw.mod.slot.leftExt.ball": "左拡張: ボール",
+  "fw.mod.slot.leftExt.fourWay": "左拡張: 4方向スイッチ",
+  "fw.mod.slot.leftExt.dial": "左拡張: 高分解能ダイヤル",
   "fw.mod.slot.leftExt.encoder": "左拡張: エンコーダ",
   "fw.mod.slot.leftExt.none": "左拡張: なし",
   "fw.mod.slot.rightStd.pad": "右標準: パッド",
   "fw.mod.slot.rightStd.ball": "右標準: ボール",
+  "fw.mod.slot.rightStd.fourWay": "右標準: 4方向スイッチ",
+  "fw.mod.slot.rightStd.dial": "右標準: 高分解能ダイヤル",
   "fw.mod.slot.rightStd.encoder": "右標準: エンコーダ",
   "fw.mod.slot.rightStd.none": "右標準: なし",
   "fw.mod.slot.rightExt.pad": "右拡張: パッド",
   "fw.mod.slot.rightExt.ball": "右拡張: ボール",
+  "fw.mod.slot.rightExt.fourWay": "右拡張: 4方向スイッチ",
+  "fw.mod.slot.rightExt.dial": "右拡張: 高分解能ダイヤル",
   "fw.mod.slot.rightExt.encoder": "右拡張: エンコーダ",
   "fw.mod.slot.rightExt.none": "右拡張: なし",
 
@@ -110,7 +119,14 @@ export const ja: Dict = {
   "fw.mod.sideRole": "{side}（{role}）",
   "fw.mod.extBase": "拡張基盤あり",
   "fw.mod.led": "LED基盤",
-  // Feature.Modules がこの接続を「なし（4）」と申告したときのマス表示。
+  // モジュール構成の格子に置く「4方向スイッチ」バッジ。trackpad パネルの
+  // tp.kind.* に対応語がない（ワイヤ側は運ばない種類のため）ので専用キー。
+  "fw.mod.kind.fourWay": "4方向スイッチ",
+  // モジュール構成の格子に置く「高分解能ダイヤル」バッジ。これも trackpad
+  // パネルの tp.kind.* に対応語がありません（ダイヤルはトラックパッドの
+  // ワイヤに乗らない＝caps でしか申告されない種類のため）。
+  "fw.mod.kind.dial": "高分解能ダイヤル",
+  // Feature.Modules がこの接続を「なし（15）」と申告したときのマス表示。
   // 「申告なし」の空欄（—）とは違い、積極的に「ここには何もない」と
   // 言っている状態なので、推定を持ち込ませないための専用の見た目にします。
   "fw.mod.none": "なし",
@@ -182,23 +198,32 @@ export const en: Dict = {
   "fw.val.layers": "{value} layer(s)",
 
   // Feature.Modules (the "Capabilities" column of the feature table). Four
-  // connectors x four kinds, baked as "position: kind" rather than composed
-  // at runtime — the same one-bit-one-key convention every other caps badge
-  // here uses.
+  // connectors x six kinds (pad/ball/4-way switch/hi-res dial/encoder/none),
+  // baked as
+  // "position: kind" rather than composed at runtime — the same
+  // one-bit-one-key convention every other caps badge here uses.
   "fw.mod.slot.leftStd.pad": "Left standard: Pad",
   "fw.mod.slot.leftStd.ball": "Left standard: Ball",
+  "fw.mod.slot.leftStd.fourWay": "Left standard: 4-way switch",
+  "fw.mod.slot.leftStd.dial": "Left standard: Hi-res dial",
   "fw.mod.slot.leftStd.encoder": "Left standard: Encoder",
   "fw.mod.slot.leftStd.none": "Left standard: None",
   "fw.mod.slot.leftExt.pad": "Left extension: Pad",
   "fw.mod.slot.leftExt.ball": "Left extension: Ball",
+  "fw.mod.slot.leftExt.fourWay": "Left extension: 4-way switch",
+  "fw.mod.slot.leftExt.dial": "Left extension: Hi-res dial",
   "fw.mod.slot.leftExt.encoder": "Left extension: Encoder",
   "fw.mod.slot.leftExt.none": "Left extension: None",
   "fw.mod.slot.rightStd.pad": "Right standard: Pad",
   "fw.mod.slot.rightStd.ball": "Right standard: Ball",
+  "fw.mod.slot.rightStd.fourWay": "Right standard: 4-way switch",
+  "fw.mod.slot.rightStd.dial": "Right standard: Hi-res dial",
   "fw.mod.slot.rightStd.encoder": "Right standard: Encoder",
   "fw.mod.slot.rightStd.none": "Right standard: None",
   "fw.mod.slot.rightExt.pad": "Right extension: Pad",
   "fw.mod.slot.rightExt.ball": "Right extension: Ball",
+  "fw.mod.slot.rightExt.fourWay": "Right extension: 4-way switch",
+  "fw.mod.slot.rightExt.dial": "Right extension: Hi-res dial",
   "fw.mod.slot.rightExt.encoder": "Right extension: Encoder",
   "fw.mod.slot.rightExt.none": "Right extension: None",
 
@@ -217,8 +242,16 @@ export const en: Dict = {
   "fw.mod.sideRole": "{side} ({role})",
   "fw.mod.extBase": "Extension base fitted",
   "fw.mod.led": "LED board",
+  // The module-layout grid's badge for a declared 4-way switch module. No
+  // trackpad-panel tp.kind.* equivalent exists (that wire never carries this
+  // kind), hence its own key.
+  "fw.mod.kind.fourWay": "4-way switch",
+  // The module-layout grid's badge for a declared hi-res dial. Like the 4-way
+  // switch above it has no tp.kind.* equivalent — the dial never rides the
+  // trackpad wire, so caps is the only channel that can report one.
+  "fw.mod.kind.dial": "Hi-res dial",
   // The grid cell for a connector Feature.Modules declared explicitly empty
-  // (kind 4). Distinct from an ordinary blank cell — this is a positive
+  // (kind 15). Distinct from an ordinary blank cell — this is a positive
   // "nothing here", so it gets its own subdued marker rather than the plain
   // dash, and it must not be confused with an estimate.
   "fw.mod.none": "None",

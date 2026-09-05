@@ -226,10 +226,14 @@ const MODULE_SLOTS: { shift: number; slotKey: string }[] = [
 ];
 
 /** ModuleKind -> the fragment of the badge key that names it. Undeclared (0)
- * has no entry: that slot is simply omitted, not shown as anything. */
+ * has no entry: that slot is simply omitted, not shown as anything. A nibble
+ * value ModuleKind does not name at all (5-8, 10-14) falls through to
+ * `unknown` below. */
 const MODULE_KIND_KEYS: Partial<Record<ModuleKind, string>> = {
-  [ModuleKind.Pad]: "pad",
   [ModuleKind.Ball]: "ball",
+  [ModuleKind.Pad]: "pad",
+  [ModuleKind.FourWaySwitch]: "fourWay",
+  [ModuleKind.Dial]: "dial",
   [ModuleKind.Encoder]: "encoder",
   [ModuleKind.None]: "none",
 };
@@ -241,10 +245,10 @@ const MODULE_KIND_KEYS: Partial<Record<ModuleKind, string>> = {
  * template — the same "one key per bit" convention CAPS_BITS uses, so this
  * table needs no runtime string-building.
  *
- * A nibble value this app has no name for (5-15 — nothing between None's 4
- * and the nibble's ceiling of 15 is defined) is left in `unknown`, shifted
- * back to its own position, same promise decodeFeatureCaps' generic path
- * makes for a bit it does not recognise.
+ * A nibble value ModuleKind does not define (5-8 and 10-14 — everything
+ * outside {0, 1, 2, 3, 4, 9, 15}) is left in `unknown`, shifted back to its
+ * own position, same promise decodeFeatureCaps' generic path makes for a bit
+ * it does not recognise.
  */
 function decodeModulesCaps(caps: number): CapsDecode {
   const badges: Msg[] = [];

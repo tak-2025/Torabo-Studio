@@ -68,8 +68,6 @@
  * canWriteFeature/APP_MAX_WIRE_VER below refuse.
  */
 
-import { tr } from "../i18n";
-
 export const CAPS_MAGIC = 0x4354; // "TC"
 /**
  * The descriptor layout this app was written against. NOT a gate: decodeCaps
@@ -411,8 +409,16 @@ export function canWriteFeature(caps: ToraboCaps | null, id: Feature): boolean {
 }
 
 /**
- * The version the descriptor named, or the "older firmware" wording when it
- * could not name one.
+ * The version the descriptor named, or null when it could not name one.
+ *
+ * This module is a SEAM: it must not import Studio's i18n (Torabo-Float
+ * translates it verbatim as shared/caps/toraboCaps.ts, and Float has no i18n
+ * of its own to hand it — see PLAN-translators.md §2.5). So unlike the old
+ * version of this function, it does NOT resolve the "older firmware" wording
+ * itself — null means exactly that, and every caller localizes the unknown
+ * case in its own words. Studio's FirmwareInfoPanel does so with
+ * `t("sys.caps.fwUnknown")`, unchanged from what this function used to return
+ * directly.
  *
  * It is the ext_FW version — caps.c fills the header from
  * CONFIG_TORABO_FW_VERSION_*, which versions the torabo modules, not the ZMK
@@ -420,8 +426,8 @@ export function canWriteFeature(caps: ToraboCaps | null, id: Feature): boolean {
  * firmware-info tab labels it "ext_FW"); calling it "the firmware version"
  * invites a comparison against a ZMK release that means nothing.
  */
-export function fwVersionString(caps: ToraboCaps | null): string {
-  if (!caps) return tr("sys.caps.fwUnknown");
+export function fwVersionString(caps: ToraboCaps | null): string | null {
+  if (!caps) return null;
   const { major, minor, patch } = caps.fw;
   return `${major}.${minor}.${patch}`;
 }
@@ -503,27 +509,57 @@ export function centralSideFromHeader(caps: ToraboCaps | null): CapsSide {
 
 /**
  * A module slot's declared kind — Feature.Modules' caps word is four of these
- * nibbles packed together (bits0-3/4-7/8-11/12-15). The three non-zero,
- * non-"none" values are numbered exactly like the trackpad wire's own
- * per-device meta byte (TpKind in trackpad/tpConfigV2.ts, TP_META_KIND_* in
- * config.h) — both this feature and that wire can report the same physical
- * pad, so sharing the numbering is what lets moduleLayout.ts dedupe them by
- * value instead of by a translation table.
+ * nibbles packed together (bits0-3/4-7/8-11/12-15).
+ *
+ * NOT numbered the same as the trackpad wire's own per-device meta byte
+ * (TpKind in trackpad/tpConfigV2.ts, TP_META_KIND_* in config.h), despite
+ * both being able to report the same physical device. The two schemes were
+ * split apart 2026-09-05 so this one can grow a slot kind
+ * (FourWaySwitch) the frozen trackpad wire will never need to carry, without
+ * touching TpKind. Anywhere both channels might describe the same connector
+ * (moduleLayout.ts, deduping a declared slot against a trackpad-wire device),
+ * the two are bridged explicitly via moduleKindFromTpKind() rather than by
+ * comparing the raw numbers.
  *
  * Firmware names (caps.h `enum torabo_caps_slot`): TORABO_CAPS_SLOT_UNDECLARED
- * =0, _PAD=1, _BALL=2, _ENCODER=3, _NONE=4. Values cross-checked with the
- * firmware side on 2026-09-04.
+ * =0, _BALL=1, _PAD=2, _SWITCH4=3, _DIAL=4, _ENCODER=9, _NONE=15. The nibble
+ * values left over (5-8 and 10-14) are undefined on both sides — an app that
+ * meets one must treat it as unknown: decodeFeatureCaps in fwInfo.ts reports
+ * it as raw unknown hex, and moduleLayout.ts treats the slot as if it were
+ * Undeclared for placement purposes. Values cross-checked with the
+ * firmware side on 2026-09-05 (supersedes the 2026-09-04 numbering, which
+ * this app's own pre-release test build was the only firmware ever to emit).
  */
 export const ModuleKind = {
   /** Slot's nibble is 0: nothing said about this connector. Not the same as
    * None — this is silence, None is a positive statement. */
   Undeclared: 0,
-  Pad: 1,
-  Ball: 2,
-  Encoder: 3,
+  Ball: 1,
+  Pad: 2,
+  /** A 4-direction switch module. Reserved: no builder emits this slot value
+   * yet, but the decoder already knows its name so a future build that does
+   * needs no app change. */
+  FourWaySwitch: 3,
+  /**
+   * A high-resolution dial (高分解能ダイヤル), TORABO_CAPS_SLOT_DIAL in caps.h.
+   *
+   * Caps-only, and the one slot kind with NO counterpart in the trackpad
+   * wire's own device numbering (TpKind, trackpad/tpConfigV2.ts): the dial
+   * does not ride that wire, so moduleKindFromTpKind() can never produce this
+   * value and a declared Dial slot is therefore never deduped against — nor
+   * contradicted by — a trackpad-wire device. By hardware convention it hangs
+   * off a STANDARD connector, never an extension one — though nothing here
+   * assumes that: the caps row names the connector outright.
+   *
+   * Naming and rendering only. Nothing in this app supports a dial; this
+   * member exists so a value the firmware already names stops being shown as
+   * unknown hex.
+   */
+  Dial: 4,
+  Encoder: 9,
   /** The connector is populated with nothing — an explicit, positive "empty",
    * distinct from Undeclared's silence. */
-  None: 4,
+  None: 15,
 } as const;
 export type ModuleKind = (typeof ModuleKind)[keyof typeof ModuleKind];
 
@@ -544,11 +580,11 @@ export interface ModuleSlots {
  * Firmware layout constants (caps.h): TORABO_CAPS_MOD_SLOT_BITS 4 /
  * TORABO_CAPS_MOD_SLOT_MASK 0xF / TORABO_CAPS_MOD_LEFT_STD_SHIFT 0 /
  * _LEFT_EXT_SHIFT 4 / _RIGHT_STD_SHIFT 8 / _RIGHT_EXT_SHIFT 12. The values come
- * from CONFIG_TORABO_SLOT_LEFT_STD / _LEFT_EXT / _RIGHT_STD / _RIGHT_EXT
- * (int 0-4, default 0), which the firmware builder always emits. The shared
- * golden — this user's hardware, 0x1213, row bytes [0x0B,0x01,0x13,0x12] — is
- * pinned in toraboCaps.test.ts here and in test_caps_decl.c / test_caps.c on
- * the firmware side.
+ * from CONFIG_TORABO_SLOT_LEFT_STD / _LEFT_EXT / _RIGHT_STD / _RIGHT_EXT,
+ * which the firmware builder always emits. The shared golden — this user's
+ * hardware, 0x2129, row bytes [0x0B,0x01,0x29,0x21] — is pinned in
+ * toraboCaps.test.ts here and in test_caps_decl.c / test_caps.c on the
+ * firmware side.
  *
  * A present row with every nibble 0 (an unset CONFIG_TORABO_SLOT_* on
  * firmware that DOES have the row) is NOT null: it decodes to four

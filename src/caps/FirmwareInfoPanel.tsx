@@ -29,8 +29,9 @@ import {
  * One "label: value" pair in the header block.
  *
  * `mono` is off for the one value that is a sentence rather than a number: with
- * no descriptor, fwVersionString returns the "older firmware" wording, and a
- * monospace font on prose reads as a value the keyboard actually sent.
+ * no descriptor, fwVersionString returns null and this panel substitutes the
+ * "older firmware" wording (sys.caps.fwUnknown), and a monospace font on
+ * prose reads as a value the keyboard actually sent.
  */
 function Fact({
   label,
@@ -503,14 +504,18 @@ export function FirmwareInfoPanel({
       </div>
 
       <section className="flex flex-wrap gap-x-10 gap-y-3 rounded-md border border-base-300 bg-base-200/40 p-4 self-start">
-        {/* fwVersionString is the app's one answer to "which build is this?",
-            including its wording for "it could not say". The number comes from
-            CONFIG_TORABO_FW_VERSION_* (caps.c), so it versions the torabo
-            ext_FW modules — NOT the ZMK the keyboard is built on. Labelled
-            ext_FW for that reason: read as a ZMK version it would be wrong. */}
+        {/* fwVersionString is the app's one answer to "which build is this?".
+            It returns null rather than resolving the "it could not say"
+            wording itself — toraboCaps.ts is an i18n-free seam shared
+            verbatim with Torabo-Float (PLAN-translators.md §2.5), so Studio
+            localizes the unknown case here, same text as before this change.
+            The number comes from CONFIG_TORABO_FW_VERSION_* (caps.c), so it
+            versions the torabo ext_FW modules — NOT the ZMK the keyboard is
+            built on. Labelled ext_FW for that reason: read as a ZMK version
+            it would be wrong. */}
         <Fact
           label={t("fw.hdr.version")}
-          value={fwVersionString(caps)}
+          value={fwVersionString(caps) ?? t("sys.caps.fwUnknown")}
           mono={!!caps}
         />
         <Fact

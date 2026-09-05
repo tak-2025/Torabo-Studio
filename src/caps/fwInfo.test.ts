@@ -283,15 +283,18 @@ describe("decodeFeatureCaps: Trackball/Encoder are back to pre-phase9 shape", ()
 });
 
 /**
- * Feature.Modules (id 11, TORABO_FEAT_MODULES, redesigned 2026-09-04): one
- * caps u16, four 4-bit slots (bits0-3/4-7/8-11/12-15 = left standard/left
- * extension/right standard/right extension), each independently
- * 0=undeclared/1=pad/2=ball/3=encoder/4=none. Golden word 0x1213 is the real
- * descriptor observed on hardware: encoder/pad/ball/pad.
+ * Feature.Modules (id 11, TORABO_FEAT_MODULES, redesigned 2026-09-04, slot
+ * kind renumbered 2026-09-05): one caps u16, four 4-bit slots
+ * (bits0-3/4-7/8-11/12-15 = left standard/left extension/right
+ * standard/right extension), each independently 0=undeclared/1=ball/2=pad/
+ * 3=4-way switch (reserved)/4=hi-res dial/9=encoder/15=none. Golden word
+ * 0x2129 is the real descriptor observed on hardware: encoder/pad/ball/pad;
+ * 0x2124 is the firmware-pinned variant of the same layout with a hi-res
+ * dial on the left standard connector instead of the encoder.
  */
 describe("decodeFeatureCaps: Feature.Modules", () => {
-  it("golden: 0x1213 decodes to one badge per slot, no unknown leftover", () => {
-    const { badges, unknown } = decodeFeatureCaps(Feature.Modules, 0x1213);
+  it("golden: 0x2129 decodes to one badge per slot, no unknown leftover", () => {
+    const { badges, unknown } = decodeFeatureCaps(Feature.Modules, 0x2129);
     expect(badges).toEqual([
       { key: "fw.mod.slot.leftStd.encoder" },
       { key: "fw.mod.slot.leftExt.pad" },
@@ -302,12 +305,44 @@ describe("decodeFeatureCaps: Feature.Modules", () => {
   });
 
   it("omits an Undeclared (0) slot entirely — no dash, no badge", () => {
-    // Only leftStd declared (Ball=2); the other three nibbles are 0.
-    const { badges } = decodeFeatureCaps(Feature.Modules, 0x0002);
+    // Only leftStd declared (Ball=1); the other three nibbles are 0.
+    const { badges } = decodeFeatureCaps(Feature.Modules, 0x0001);
     expect(badges).toEqual([{ key: "fw.mod.slot.leftStd.ball" }]);
   });
 
-  it("decodes an explicit None (4) slot as its own badge", () => {
+  it("decodes a declared FourWaySwitch (3) slot as its own badge", () => {
+    const { badges, unknown } = decodeFeatureCaps(
+      Feature.Modules,
+      ModuleKind.FourWaySwitch << 4,
+    );
+    expect(badges).toEqual([{ key: "fw.mod.slot.leftExt.fourWay" }]);
+    expect(unknown).toBe(0);
+  });
+
+  it("golden: 0x2124 decodes to dial/pad/ball/pad, no unknown leftover", () => {
+    // Same 52-byte descriptor as the 0x2129 golden (see toraboCaps.test.ts)
+    // with one word changed — the dial (TORABO_CAPS_SLOT_DIAL = 4) on the
+    // left standard connector. Firmware-pinned layout, not an invented value.
+    const { badges, unknown } = decodeFeatureCaps(Feature.Modules, 0x2124);
+    expect(badges).toEqual([
+      { key: "fw.mod.slot.leftStd.dial" },
+      { key: "fw.mod.slot.leftExt.pad" },
+      { key: "fw.mod.slot.rightStd.ball" },
+      { key: "fw.mod.slot.rightExt.pad" },
+    ]);
+    expect(unknown).toBe(0);
+  });
+
+  it("decodes a declared Dial (4) slot as its own badge, in any position", () => {
+    const { badges, unknown } = decodeFeatureCaps(
+      Feature.Modules,
+      ModuleKind.Dial << 8,
+    );
+    expect(badges).toEqual([{ key: "fw.mod.slot.rightStd.dial" }]);
+    expect(unknown).toBe(0);
+  });
+
+  it("decodes an explicit None (15) slot as its own badge", () => {
     const { badges, unknown } = decodeFeatureCaps(Feature.Modules, ModuleKind.None << 12);
     expect(badges).toEqual([{ key: "fw.mod.slot.rightExt.none" }]);
     expect(unknown).toBe(0);
@@ -320,12 +355,20 @@ describe("decodeFeatureCaps: Feature.Modules", () => {
     });
   });
 
-  it("leaves a nibble value this app has no name for (5-15) as unknown, shifted back", () => {
-    // 5 is one past None(4) — nothing between it and the nibble's ceiling of
-    // 15 is defined by ModuleKind.
+  it("leaves a nibble value this app does not define as unknown, shifted back", () => {
+    // 5 is the first undefined value above the named ones (Undeclared/Ball/
+    // Pad/FourWaySwitch/Dial = 0-4) and below Encoder (9).
     const { badges, unknown } = decodeFeatureCaps(Feature.Modules, 5 << 8); // rightStd = 5
     expect(badges).toEqual([]);
     expect(unknown).toBe(5 << 8);
+  });
+
+  it("leaves every other gap (5-8, 10-14) as unknown too", () => {
+    for (const v of [5, 6, 7, 8, 10, 11, 12, 13, 14]) {
+      const { badges, unknown } = decodeFeatureCaps(Feature.Modules, v); // leftStd
+      expect(badges).toEqual([]);
+      expect(unknown).toBe(v);
+    }
   });
 });
 

@@ -16,6 +16,7 @@ import {
   ModuleLayout,
   SplitRole,
   deriveModuleLayout,
+  moduleKindFromTpKind,
   sideRole,
   vacantCells,
 } from "./moduleLayout";
@@ -447,16 +448,19 @@ describe("deriveModuleLayout: degraded reads", () => {
 });
 
 /**
- * Feature.Modules (id 11, TORABO_FEAT_MODULES, redesigned 2026-09-04): the
- * firmware may now DECLARE central side (header `_rsv`, unchanged) and, in
- * ONE unified caps word, what each of the four connectors carries — instead
- * of this module having to infer it. Declared pad/ball/encoder slots render
- * as REPORTS (no `inferred: true`, i.e. a solid badge in FirmwareInfoPanel),
- * same as a device the trackpad wire itself placed; a declared "None" (4)
- * renders as its own subdued marker and blocks inference from landing there.
- * Golden word is the real descriptor observed on hardware: 0x1213 = encoder
- * on left standard, pad on left extension, ball on right standard, pad on
- * right extension.
+ * Feature.Modules (id 11, TORABO_FEAT_MODULES, redesigned 2026-09-04, slot
+ * kind renumbered 2026-09-05): the firmware may now DECLARE central side
+ * (header `_rsv`, unchanged) and, in ONE unified caps word, what each of the
+ * four connectors carries — instead of this module having to infer it.
+ * Declared ball/pad/4-way-switch/dial/encoder slots render as REPORTS (no
+ * `inferred: true`, i.e. a solid badge in FirmwareInfoPanel), same as a
+ * device the trackpad wire itself placed; a declared "None" (15) renders as
+ * its own subdued marker and blocks inference from landing there. Golden
+ * word is the real descriptor observed on hardware: 0x2129 = encoder on left
+ * standard, pad on left extension, ball on right standard, pad on right
+ * extension. The second golden, 0x2124, is the firmware-pinned variant of
+ * that same layout with a hi-res dial (ModuleKind.Dial = 4) on the left
+ * standard connector in place of the encoder.
  */
 describe("deriveModuleLayout: Feature.Modules declaration", () => {
   describe("central side: header _rsv takes priority over the LED bit", () => {
@@ -493,10 +497,10 @@ describe("deriveModuleLayout: Feature.Modules declaration", () => {
     });
   });
 
-  describe("golden: 0x1213 reports all four cells, undashed", () => {
+  describe("golden: 0x2129 reports all four cells, undashed", () => {
     it("places encoder/pad/ball/pad exactly where declared, no unplaced, no inference", () => {
       const layout = deriveModuleLayout(
-        caps([{ id: Feature.Modules, caps: 0x1213 }]),
+        caps([{ id: Feature.Modules, caps: 0x2129 }]),
         null,
       )!;
       expect(cell(layout, TpSide.Left, TpConn.Standard).items).toEqual([
@@ -522,7 +526,7 @@ describe("deriveModuleLayout: Feature.Modules declaration", () => {
       // Unlike the pre-declaration inference, a declared slot does not depend
       // on knowing which half is central — it names its own connector directly.
       const layout = deriveModuleLayout(
-        caps([{ id: Feature.Modules, caps: 0x1213 }]), // no LED, no _rsv
+        caps([{ id: Feature.Modules, caps: 0x2129 }]), // no LED, no _rsv
         null,
       )!;
       expect(layout.central).toBeNull();
@@ -532,7 +536,7 @@ describe("deriveModuleLayout: Feature.Modules declaration", () => {
     });
   });
 
-  describe("None (4): an explicit empty marker that blocks inference", () => {
+  describe("None (15): an explicit empty marker that blocks inference", () => {
     it("renders as a subdued, non-inferred marker", () => {
       const layout = deriveModuleLayout(
         caps([{ id: Feature.Modules, caps: modulesCaps(ModuleKind.None, 0, 0, 0) }]),
@@ -688,6 +692,176 @@ describe("deriveModuleLayout: Feature.Modules declaration", () => {
       expect(cell(layout, TpSide.Right, TpConn.Standard).items).toEqual([
         { key: "tp.kind.trackball", inferred: true },
       ]);
+    });
+  });
+
+  /**
+   * FourWaySwitch (3): reserved on the firmware side — no builder emits it
+   * yet — but the decoder already knows the name, so a declaring build needs
+   * no app change. It occupies its cell exactly like Pad/Ball/Encoder: a
+   * solid, non-inferred badge, and it blocks the fallback inference the same
+   * way any other declared kind does.
+   */
+  describe("FourWaySwitch (3): declared like any other kind, no trackpad-wire counterpart", () => {
+    it("renders as its own badge, not inferred", () => {
+      const layout = deriveModuleLayout(
+        caps([
+          { id: Feature.Modules, caps: modulesCaps(0, ModuleKind.FourWaySwitch, 0, 0) },
+        ]),
+        null,
+      )!;
+      expect(cell(layout, TpSide.Left, TpConn.Extension).items).toEqual([
+        { key: "fw.mod.kind.fourWay" },
+      ]);
+    });
+  });
+
+  /**
+   * Dial (4): the hi-res dial. Declared like any other kind — it occupies its
+   * cell as a solid report and blocks the fallback inference there, exactly
+   * as Pad/Ball/Encoder/FourWaySwitch do. Unlike Ball/Pad/Encoder it has NO
+   * TpKind counterpart (the dial does not ride the trackpad wire), so it can
+   * never be deduped against a wire device — moduleKindFromTpKind() cannot
+   * produce it.
+   */
+  describe("golden: 0x2124 places a hi-res dial on the left standard connector", () => {
+    // Same 52-byte firmware descriptor as the 0x2129 golden (byte vector in
+    // toraboCaps.test.ts; `_rsv` 0x02 = central is the right half) with one
+    // word changed: 0x2129 -> 0x2124, the left standard connector's encoder
+    // replaced by the dial. Firmware-pinned, not an invented fixture value.
+    const DIAL_GOLDEN = 0x2124;
+
+    it("reports dial/pad/ball/pad exactly where declared, no unplaced, no inference", () => {
+      const layout = deriveModuleLayout(
+        caps([{ id: Feature.Modules, caps: DIAL_GOLDEN }], CapsSide.Right),
+        null,
+      )!;
+      expect(layout.central).toBe(TpSide.Right);
+      expect(cell(layout, TpSide.Left, TpConn.Standard).items).toEqual([
+        { key: "fw.mod.kind.dial" },
+      ]);
+      expect(cell(layout, TpSide.Left, TpConn.Extension).items).toEqual([
+        { key: "tp.kind.trackpad" },
+      ]);
+      expect(cell(layout, TpSide.Right, TpConn.Standard).items).toEqual([
+        { key: "tp.kind.trackball" },
+      ]);
+      expect(cell(layout, TpSide.Right, TpConn.Extension).items).toEqual([
+        { key: "tp.kind.trackpad" },
+      ]);
+      expect(layout.unplaced).toEqual([]);
+      for (const c of layout.cells) {
+        expect(c.items.every((i) => !i.inferred)).toBe(true);
+      }
+    });
+
+    it("suppresses the trackball's central-seat inference at the dial's cell", () => {
+      // Central is the LEFT half here, so the pre-declaration estimate would
+      // seat the ball on left standard — the declared dial has to stop it,
+      // the same way a declared Pad/Ball/Encoder/None does.
+      const layout = deriveModuleLayout(
+        caps(
+          [
+            { id: Feature.Trackball, wireVer: 3 },
+            { id: Feature.Modules, caps: modulesCaps(ModuleKind.Dial, 0, 0, 0) },
+          ],
+          CapsSide.Left,
+        ),
+        null,
+      )!;
+      expect(cell(layout, TpSide.Left, TpConn.Standard).items).toEqual([
+        { key: "fw.mod.kind.dial" },
+      ]);
+      expect(layout.unplaced).toEqual([{ key: "fw.mod.trackball" }]);
+    });
+
+    it("is ruled out as a seat for the encoder's elimination inference", () => {
+      // leftStd = dial, leftExt/rightStd = explicitly none: exactly one cell
+      // is left, and it must be rightExt rather than the dial's own cell.
+      const layout = deriveModuleLayout(
+        caps([
+          { id: Feature.Encoder },
+          {
+            id: Feature.Modules,
+            caps: modulesCaps(ModuleKind.Dial, ModuleKind.None, ModuleKind.None, 0),
+          },
+        ]),
+        null,
+      )!;
+      expect(cell(layout, TpSide.Left, TpConn.Standard).items).toEqual([
+        { key: "fw.mod.kind.dial" },
+      ]);
+      expect(cell(layout, TpSide.Right, TpConn.Extension).items).toEqual([
+        { key: "tp.kind.encoder", inferred: true },
+      ]);
+    });
+
+    it("has no TpKind counterpart, so a wire device on that cell is never a duplicate", () => {
+      // A trackpad on left standard plus a declared Dial there is a genuine
+      // contradiction, not a dedupe: the wire's own report wins the cell and
+      // the declared dial is dropped (no fw.mod.* "somewhere unplaceable"
+      // wording exists for a dial, and none is invented here).
+      const layout = deriveModuleLayout(
+        caps([{ id: Feature.Modules, caps: modulesCaps(ModuleKind.Dial, 0, 0, 0) }]),
+        [{ deviceId: 0, meta: meta(TpSide.Left, TpConn.Standard, TpKind.Trackpad) }],
+      )!;
+      expect(cell(layout, TpSide.Left, TpConn.Standard).items).toEqual([
+        { key: "tp.kind.trackpad" },
+      ]);
+      expect(layout.unplaced).toEqual([]);
+    });
+  });
+
+  /**
+   * A nibble value ModuleKind does not define — one of the gaps (5-8,
+   * 10-14) — must not be shown as a report, and must not block the
+   * fallback inference: it is treated exactly as if the slot had been left
+   * Undeclared.
+   */
+  describe("undefined slot values (e.g. 5, 7): treated as undeclared for inference", () => {
+    it("does not occupy the cell or produce a badge", () => {
+      // caps=5: leftStd nibble = 5, the first undefined value above the named
+      // ones (0-4) and below Encoder (9).
+      const layout = deriveModuleLayout(
+        caps([{ id: Feature.Modules, caps: 5 }]),
+        null,
+      )!;
+      expect(cell(layout, TpSide.Left, TpConn.Standard).items).toEqual([]);
+    });
+
+    it("still lets the trackball's central-seat inference land on that cell", () => {
+      // caps=7: leftStd nibble = 7, one of the undefined gaps (5-8, 10-14).
+      const layout = deriveModuleLayout(
+        caps(
+          [
+            { id: Feature.Trackball, wireVer: 3 },
+            { id: Feature.Modules, caps: 7 },
+          ],
+          CapsSide.Left,
+        ),
+        null,
+      )!;
+      expect(cell(layout, TpSide.Left, TpConn.Standard).items).toEqual([
+        { key: "tp.kind.trackball", inferred: true },
+      ]);
+    });
+  });
+
+  /**
+   * moduleKindFromTpKind: the one explicit bridge between the trackpad
+   * wire's frozen TpKind numbering and Feature.Modules' ModuleKind numbering
+   * (deliberately different since 2026-09-05). This is what the dedupe
+   * guards above rely on instead of comparing raw numbers.
+   */
+  describe("moduleKindFromTpKind: the TpKind <-> ModuleKind bridge", () => {
+    it("maps every TpKind device kind to its ModuleKind counterpart", () => {
+      expect(moduleKindFromTpKind(TpKind.Trackpad)).toBe(ModuleKind.Pad);
+      expect(moduleKindFromTpKind(TpKind.Trackball)).toBe(ModuleKind.Ball);
+      expect(moduleKindFromTpKind(TpKind.Encoder)).toBe(ModuleKind.Encoder);
+    });
+
+    it("has no counterpart for TpKind.Unknown", () => {
+      expect(moduleKindFromTpKind(TpKind.Unknown)).toBeUndefined();
     });
   });
 });

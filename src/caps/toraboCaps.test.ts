@@ -304,7 +304,10 @@ describe("queries over a decoded descriptor", () => {
 
     it("featureInfo / fwVersionString / the coast+debounce+led queries all fail closed", () => {
       expect(featureInfo(null, Feature.Timing)).toBeNull();
-      expect(fwVersionString(null)).toEqual(expect.any(String));
+      // toraboCaps.ts is an i18n-free seam (shared verbatim with Torabo-Float,
+      // PLAN-translators.md §2.5): null, not a resolved "unknown" string —
+      // the caller localizes it.
+      expect(fwVersionString(null)).toBeNull();
       expect(hasSplitDebounce(null)).toBe(false);
       expect(hasTrackpadCoast(null)).toBe(false);
       expect(hasTrackballCoast(null)).toBe(false);
@@ -490,19 +493,20 @@ describe("module-layout declaration bits", () => {
   /**
    * moduleSlots() decodes Feature.Modules' caps u16: 4-bit nibbles, low to
    * high = left standard / left extension / right standard / right
-   * extension, each 0=undeclared, 1=pad, 2=ball, 3=encoder, 4=none
-   * (ModuleKind). The golden word below is the user's real hardware: an
-   * encoder on left standard, a pad on left extension, a ball on right
-   * standard, a pad on right extension.
+   * extension, each 0=undeclared, 1=ball, 2=pad, 3=4-way switch (reserved),
+   * 4=hi-res dial, 9=encoder, 15=none (ModuleKind, renumbered 2026-09-05).
+   * The golden word below is the user's real hardware: an encoder on left
+   * standard, a pad on left extension, a ball on right standard, a pad on
+   * right extension.
    *
-   *   leftStd=Encoder(3) | leftExt=Pad(1)<<4 | rightStd=Ball(2)<<8 |
-   *   rightExt=Pad(1)<<12
-   *     = 0x0003 | 0x0010 | 0x0200 | 0x1000 = 0x1213
+   *   leftStd=Encoder(9) | leftExt=Pad(2)<<4 | rightStd=Ball(1)<<8 |
+   *   rightExt=Pad(2)<<12
+   *     = 0x0009 | 0x0020 | 0x0100 | 0x2000 = 0x2129
    */
   describe("moduleSlots (Feature.Modules caps word, TORABO_FEAT_MODULES)", () => {
-    const GOLDEN_CAPS = 0x1213;
+    const GOLDEN_CAPS = 0x2129;
 
-    it("golden: 0x1213 decodes to encoder/pad/ball/pad", () => {
+    it("golden: 0x2129 decodes to encoder/pad/ball/pad", () => {
       const caps = decodeCaps(
         buildCaps([{ id: Feature.Modules, wireVer: 1, caps: GOLDEN_CAPS }]),
       );
@@ -515,13 +519,13 @@ describe("module-layout declaration bits", () => {
       });
     });
 
-    it("golden bytes: the Modules row is id=11, wireVer=1, caps 0x1213 little-endian", () => {
+    it("golden bytes: the Modules row is id=11, wireVer=1, caps 0x2129 little-endian", () => {
       // Byte-exact check of the same golden word, straight off the buffer
       // buildCaps() produced — this is what the firmware side's own encoder
       // must match byte for byte for the two to agree on the wire.
       const blob = buildCaps([{ id: Feature.Modules, wireVer: 1, caps: GOLDEN_CAPS }]);
       const entry = blob.subarray(CAPS_HDR, CAPS_HDR + CAPS_FEAT);
-      expect(Array.from(entry)).toEqual([Feature.Modules, 1, 0x13, 0x12]);
+      expect(Array.from(entry)).toEqual([Feature.Modules, 1, 0x29, 0x21]);
     });
 
     it("a present row with every nibble 0 decodes to four Undeclared slots (not null)", () => {
@@ -537,12 +541,12 @@ describe("module-layout declaration bits", () => {
       });
     });
 
-    it("decodes an explicit None (4) slot alongside declared ones", () => {
-      // rightExt = None(4)<<12 = 0x4000, layered on the golden leftStd/leftExt/
-      // rightStd above (0x0213) to prove None decodes independently of its
-      // neighbours.
+    it("decodes an explicit None (15) slot alongside declared ones", () => {
+      // rightExt = None(15)<<12 = 0xF000, layered on the golden leftStd/
+      // leftExt/rightStd above (0x0129) to prove None decodes independently
+      // of its neighbours.
       const caps = decodeCaps(
-        buildCaps([{ id: Feature.Modules, wireVer: 1, caps: 0x0213 | 0x4000 }]),
+        buildCaps([{ id: Feature.Modules, wireVer: 1, caps: 0x0129 | 0xf000 }]),
       );
       expect(moduleSlots(caps)?.rightExt).toBe(ModuleKind.None);
     });
@@ -554,6 +558,116 @@ describe("module-layout declaration bits", () => {
 
     it("fails closed with no descriptor at all", () => {
       expect(moduleSlots(null)).toBeNull();
+    });
+  });
+
+  /**
+   * The nibble values neither side defines (5-8, 10-14; 4 stopped being one
+   * of them when it was named Dial) — moduleSlots() must hand them back
+   * verbatim rather than coercing them to something defined, so every caller
+   * (fwInfo.ts's badge lookup, moduleLayout.ts's placement) can decide for
+   * itself how to treat an undefined value.
+   */
+  describe("moduleSlots: undefined nibble values pass through verbatim", () => {
+    it("decodes the gaps (5-8, 10-14) exactly as sent", () => {
+      const caps = decodeCaps(
+        buildCaps([{ id: Feature.Modules, wireVer: 1, caps: 5 | (7 << 4) }]),
+      );
+      expect(moduleSlots(caps)).toEqual({
+        leftStd: 5,
+        leftExt: 7,
+        rightStd: ModuleKind.Undeclared,
+        rightExt: ModuleKind.Undeclared,
+      });
+    });
+  });
+
+  /**
+   * Second golden: the same 52-byte descriptor, with the left standard
+   * connector carrying a hi-res dial (TORABO_CAPS_SLOT_DIAL = 4, caps.h)
+   * instead of the encoder. Written out as literal bytes rather than through
+   * buildCaps() because the point is the WHOLE descriptor: this is the
+   * firmware's own declared byte vector (test/wire/test_caps_decl.c's
+   * caps_golden_decl, 11 rows, header `_rsv` = 0x02 = central is the right
+   * half) with exactly one word changed — 0x2129 -> 0x2124, wire bytes 0x24
+   * 0x21 little-endian. 0x2124 is a firmware-pinned layout, not an arbitrary
+   * fixture number: every nibble in it is a value `enum torabo_caps_slot`
+   * defines, and the Dial nibble is the reason this app now names 4.
+   */
+  describe("golden: the 52-byte declared descriptor with a hi-res dial", () => {
+    /** MODULES row bytes: id 0x0B, wire_ver 0x01, caps 0x2124 little-endian. */
+    const GOLDEN_DIAL_CAPS = 0x2124;
+    const GOLDEN_DIAL_BYTES = new Uint8Array([
+      // header
+      0x54, 0x43, // magic 0x4354 "TC" LE
+      0x01, // desc_ver
+      0x00, 0x01, 0x01, // fw 0.1.1
+      0x0b, // feature_count = 11
+      0x02, // _rsv: bit0-1 central side = 2 (right)
+      // rows, in the firmware's build_features() order
+      0x01, 0x03, 0x01, 0x00, // trackball  wire v3, ZTC_COAST
+      0x02, 0x02, 0x00, 0x00, // macros     wire v2
+      0x03, 0x01, 0x00, 0x00, // combos     wire v1
+      0x04, 0x03, 0x10, 0x00, // trackpad   wire v3, TP_COAST
+      0x05, 0x01, 0x00, 0x00, // encoder    wire v1
+      0x06, 0x01, 0x03, 0x00, // led        wire v1, LEFT|RIGHT
+      0x07, 0x01, 0x04, 0x00, // layers     wire v1, 4 reserved
+      0x08, 0x01, 0x01, 0x00, // live_feed  wire v1, DIAG
+      0x09, 0x01, 0x01, 0x00, // rpc_tunnel wire v1, NOTIFY
+      0x0a, 0x01, 0x01, 0x00, // timing     wire v1, SPLIT_DEBOUNCE
+      0x0b, 0x01, 0x24, 0x21, // modules    wire v1, 0x2124
+    ]);
+
+    it("is 52 bytes: 8-byte header plus 11 four-byte rows", () => {
+      expect(GOLDEN_DIAL_BYTES.byteLength).toBe(52);
+      expect(GOLDEN_DIAL_BYTES.byteLength).toBe(CAPS_HDR + 11 * CAPS_FEAT);
+    });
+
+    it("declares the right half central from the `_rsv` byte (0x02)", () => {
+      const caps = decodeCaps(GOLDEN_DIAL_BYTES);
+      expect(caps.hdrCentralSide).toBe(CapsSide.Right);
+      expect(centralSideFromHeader(caps)).toBe(CapsSide.Right);
+    });
+
+    it("the Modules row is id=11, wireVer=1, caps 0x2124 little-endian", () => {
+      // Offset 48 = 8-byte header + 10 preceding rows; caps word at 50-51.
+      expect(Array.from(GOLDEN_DIAL_BYTES.subarray(48, 52))).toEqual([
+        Feature.Modules,
+        1,
+        0x24,
+        0x21,
+      ]);
+      const caps = decodeCaps(GOLDEN_DIAL_BYTES);
+      expect(featureInfo(caps, Feature.Modules)?.caps).toBe(GOLDEN_DIAL_CAPS);
+    });
+
+    it("0x2124 decodes to dial/pad/ball/pad", () => {
+      // Nibbles low to high: leftStd=Dial(4) | leftExt=Pad(2)<<4 |
+      // rightStd=Ball(1)<<8 | rightExt=Pad(2)<<12
+      //   = 0x0004 | 0x0020 | 0x0100 | 0x2000 = 0x2124.
+      // Same hardware pattern as the 0x2129 golden, with the left standard
+      // connector's encoder replaced by the dial.
+      expect(moduleSlots(decodeCaps(GOLDEN_DIAL_BYTES))).toEqual({
+        leftStd: ModuleKind.Dial,
+        leftExt: ModuleKind.Pad,
+        rightStd: ModuleKind.Ball,
+        rightExt: ModuleKind.Pad,
+      });
+    });
+
+    it("leaves the other ten rows exactly as the 0x2129 fixture has them", () => {
+      // The whole point of the MODULES row: declaring a dial touches nothing
+      // else in the descriptor — the trackball and encoder rows in
+      // particular still carry no placement bits.
+      const caps = decodeCaps(GOLDEN_DIAL_BYTES);
+      expect(caps.features).toHaveLength(11);
+      expect(featureInfo(caps, Feature.Trackball)).toEqual({
+        id: Feature.Trackball,
+        wireVer: 3,
+        caps: TrackballCap.Coast,
+      });
+      expect(featureInfo(caps, Feature.Encoder)?.caps).toBe(0);
+      expect(fwVersionString(caps)).toBe("0.1.1");
     });
   });
 });
