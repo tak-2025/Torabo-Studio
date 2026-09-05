@@ -1,7 +1,7 @@
 {
   "name": "torabo-studio",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "An unofficial ZMK Studio fork with live BLE/USB editing for torabo-tsuki (trackball, trackpad, macros, combos, encoder, LED, timing).",
   "license": "Apache-2.0",
   "author": "tak-2025",
