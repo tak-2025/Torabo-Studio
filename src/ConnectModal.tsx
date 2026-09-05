@@ -8,9 +8,10 @@ import { Key, ListBox, ListBoxItem, Selection } from "react-aria-components";
 import { useModalRef } from "./misc/useModalRef";
 import { GenericModal } from "./GenericModal";
 import { LANGS, useI18n } from "./i18n";
-// The "no transports at all" advice is platform-specific (Studio points at
-// Web Serial/Web Bluetooth support; the Android shell has its own content) —
-// see platform/transports.tsx's header comment for why this is the seam.
+// The "no transports at all" advice is platform-specific (Studio's default
+// points at Web Serial/Web Bluetooth support; a derivative target may have
+// its own content) — see platform/transports.tsx's header comment for why
+// this is the seam.
 import { noTransportsAdvice } from "./platform/transports";
 
 export type TransportFactory = {

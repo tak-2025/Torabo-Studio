@@ -36,8 +36,8 @@ import { AppFooter } from "./AppFooter";
 import { AboutModal } from "./AboutModal";
 import { LicenseNoticeModal } from "./misc/LicenseNoticeModal";
 
-// Which radios this build can reach a keyboard over. Studio and the Android
-// (Capacitor) shell genuinely disagree here — see platform/transports.tsx's
+// Which radios this build can reach a keyboard over. A derivative target may
+// genuinely disagree with Studio's default here — see platform/transports.tsx's
 // header comment for why that file, not this constant, is the seam.
 const TRANSPORTS: TransportFactory[] = registerPlatformTransports();
 

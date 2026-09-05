@@ -64,6 +64,10 @@ const files = [
   ...readdirSync(join(SRC, "i18n", "panels"))
     .filter((f) => f.endsWith(".ts") && f !== "index.ts")
     .map((f) => ({ path: join(SRC, "i18n", "panels", f), area: f.slice(0, -3) })),
+  // The platform seam's dictionary (see src/platform/messages.ts's header
+  // comment). Empty on Studio's own main; a derivative target's protected
+  // override fills it in, so this still needs checking there too.
+  { path: join(SRC, "platform", "messages.ts"), area: "platform/messages" },
 ];
 
 const problems = [];

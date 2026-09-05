@@ -6,8 +6,12 @@
 //
 // Panel-specific copy lives in ./panels/*.ts, one file per settings panel, and
 // is merged in below. This file keeps what is shared across the whole app.
+//
+// A derivative target's own strings (see PLAN-translators.md §2.5) are merged
+// in last, from ../platform/messages — see that file's header comment.
 
 import { panelEn, panelJa } from "./panels";
+import { platformMessages } from "../platform/messages";
 
 export type Lang = "ja" | "en";
 
@@ -47,17 +51,6 @@ const ja: Dict = {
     "・PC の Bluetooth を切る（USB が唯一の出力先になり、そのまま繋がります）\n" +
     "・またはキーマップに割り当てた &out（Output Selection）キーで USB に切り替える\n\n" +
     "この設定はキーボード側に保存され、キーマップを変えても残ります。",
-  // Android (Capacitor) build only — shown when the Bluetooth transport failed
-  // to register, which in practice means permissions were denied. Unused on
-  // this build (src/platform/transports.tsx never references these keys
-  // here); kept in sync so the translator's Android override can rely on them
-  // existing in both languages.
-  "connect.nativeUnavailable":
-    "利用できる接続方法がありません。Bluetooth 接続の準備ができていないようです。",
-  "connect.nativeCheckPermission":
-    "端末の設定 → アプリ → Torabo Studio → 権限 で「付近のデバイス」を許可してください。",
-  "connect.nativeCheckBluetooth":
-    "Bluetooth を ON にしてから、アプリを再起動してください。",
   "lang.label": "言語",
   "keylayout.label": "表示用のキー配列",
   "keylayout.desc":
@@ -279,12 +272,6 @@ const en: Dict = {
     "- Turn off Bluetooth on this PC (USB then becomes the only endpoint)\n" +
     "- Or switch the output to USB with an &out (Output Selection) key\n\n" +
     "This setting is stored on the keyboard and survives keymap changes.",
-  "connect.nativeUnavailable":
-    "No connection method is available. Bluetooth does not appear to be ready.",
-  "connect.nativeCheckPermission":
-    "Grant the \"Nearby devices\" permission under Settings > Apps > Torabo Studio > Permissions.",
-  "connect.nativeCheckBluetooth":
-    "Turn Bluetooth on, then restart the app.",
   "lang.label": "Language",
   "keylayout.label": "Legend layout",
   "keylayout.desc":
@@ -456,6 +443,8 @@ const en: Dict = {
 };
 
 export const messages: Record<Lang, Dict> = {
-  ja: { ...panelJa, ...ja },
-  en: { ...panelEn, ...en },
+  // platformMessages last: see its header comment for why a derivative
+  // target's override is allowed to win over this app's own strings.
+  ja: { ...panelJa, ...ja, ...platformMessages.ja },
+  en: { ...panelEn, ...en, ...platformMessages.en },
 };

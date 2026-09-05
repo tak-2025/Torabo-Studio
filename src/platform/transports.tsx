@@ -1,16 +1,23 @@
 /**
- * The one seam between Torabo Studio (this file) and the Android
- * (Capacitor) shell's protected override of the same path.
+ * `src/platform/` is Torabo Studio's platform seam: the small set of files
+ * where a derivative target — built from this repo by its own translator
+ * script, per PLAN-translators.md §2.5 ("源流 main の純粋性ルール") — is allowed
+ * to substitute its own version instead of receiving Studio's verbatim.
+ * Every file here ships a real, working Studio default; nothing in Studio
+ * depends on any specific derivative existing, and this repo alone explains
+ * everything Studio does. A derivative's translator keeps a PROTECTED list
+ * of the paths under here it overrides (see e.g.
+ * torabo-STUDIO-Android/scripts/translate-from-studio.mjs) — Studio itself
+ * has no knowledge of that list.
  *
- * Everything else in this app is translated verbatim from Studio into the
- * Android repo (see torabo-STUDIO-Android/scripts/translate-from-studio.mjs);
- * this file is the exception the translator is told never to touch, because
- * it is the one place the two builds must genuinely disagree: which radios
- * exist to connect over. Studio talks to Web Serial / Web Bluetooth / the
- * Tauri desktop backends; Android owns its Bluetooth stack directly through
- * `capacitor/ble.ts` and has none of the others. Keeping that one difference
+ * This particular file is the seam for which radios exist to connect over —
+ * the one thing a platform's connection story can genuinely disagree with
+ * Studio's about. Studio's default here talks to Web Serial / Web Bluetooth
+ * / the Tauri desktop backends. The current concrete example is the Android
+ * (Capacitor) shell, which owns its Bluetooth stack directly through its own
+ * `capacitor/ble.ts` and has none of the others. Keeping that difference
  * behind a function call is what lets every file that USES the transport
- * list (App.tsx, ConnectModal.tsx) stay byte-identical between the two repos.
+ * list (App.tsx, ConnectModal.tsx) stay identical across every target.
  */
 import type { TransportFactory } from "../ConnectModal";
 import type { ReactNode } from "react";

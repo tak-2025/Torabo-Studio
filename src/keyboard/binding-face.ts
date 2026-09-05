@@ -1,6 +1,24 @@
 /**
  * Decides what a keymap binding should show on its keycap.
  *
+ * Translated verbatim into Torabo-Float (`shared/keyboard/binding-face.ts`,
+ * see PLAN-translators.md フェーズ②) — this file carries no Studio-only
+ * dependency so the same bytes work unchanged in both repos:
+ *   - `behavior` is typed as the structural `BehaviorFaceSource` below, not
+ *     the live-RPC `GetBehaviorDetailsResponse`, so Float can pass a
+ *     keymap-cache `CachedBehavior` (see cache.ts) without adapting anything;
+ *     Studio's own callers keep passing `GetBehaviorDetailsResponse` values
+ *     unchanged (it satisfies the structural type as-is).
+ *   - `validateValue` is inlined below rather than imported from
+ *     `../behaviors/parameters` — Float has no `behaviors/` directory.
+ *   - `macroNames` (last param) defaults to `null`, so Float's caller (which
+ *     has no MacroNamesContext yet) can simply omit it and get today's
+ *     `M<N>` fallback for every `&dmac` key, exactly as before.
+ *   - The label-length limits live in the sibling `./sizing` (structural seam,
+ *     PLAN-translators.md §2.5) rather than being hardcoded here, so a
+ *     phone-scale board (Key-App) can override just those two numbers without
+ *     touching this file at all.
+ *
  * The board used to draw `param1` as a HID usage unconditionally, which is only
  * right for `&kp`. Everything else drew blank or misleading: `&lt 2 A` drew the
  * *layer number* as if it were a usage (so the key looked empty), `&mt LSHFT Z`
@@ -31,20 +49,12 @@
 import type {
   BehaviorBindingParametersSet,
   BehaviorParameterValueDescription,
-  GetBehaviorDetailsResponse,
 } from "@zmkfirmware/zmk-studio-ts-client/behaviors";
 import type { BehaviorBinding } from "@zmkfirmware/zmk-studio-ts-client/keymap";
 
 import { hid_usage_get_labels, hid_usage_page_and_id_from_usage } from "../hid-usages";
-import { validateValue } from "../behaviors/parameters";
-import type { MacroNames } from "../dynamic_macros/MacroNamesContext";
+import { MAX_BODY_LABEL, MAX_HOLD_LABEL } from "./sizing";
 import ValueNames from "./behavior-value-names.json";
-
-/** Header space is tight (9 chars for the behavior name), so hold labels are
- *  clipped rather than allowed to push the name out of the key. */
-const MAX_HOLD_LABEL = 6;
-/** A key body fits roughly this much before it stops being readable. */
-const MAX_BODY_LABEL = 7;
 
 const valueNames: Record<string, string> = ValueNames;
 
@@ -72,6 +82,31 @@ export interface LayerRef {
   name: string;
 }
 
+/**
+ * What this needs of a behavior. Structural rather than importing
+ * `GetBehaviorDetailsResponse` (Studio's live-RPC shape) or `CachedBehavior`
+ * (Float's keymap-cache shape), so both can be passed as-is. `metadata` is
+ * optional on purpose: a cache built from a Torabo Studio backup file (or a
+ * keyboard whose behaviors have not been read yet) carries display names
+ * only, and then every face falls back to the old param1-as-usage rendering
+ * rather than throwing.
+ */
+export interface BehaviorFaceSource {
+  displayName: string;
+  metadata?: BehaviorBindingParametersSet[];
+}
+
+/**
+ * Slot names for `&dmac` keycaps, as read from a v2-capable keyboard's macros
+ * wire (see dynamic_macros/MacroNamesContext.tsx, dmacConfig.ts). Structural
+ * rather than importing Studio's `MacroNames` type, so this file has no
+ * dependency on dynamic_macros/ — `null` means "unknown" (no v2 read yet, or
+ * v1 firmware, or — Float's case — no such context exists at all), distinct
+ * from an array of empty strings, which means "read, and these slots are
+ * unnamed".
+ */
+type MacroNameLookup = readonly (string | undefined)[] | null;
+
 export interface BindingFace {
   /** A HID usage to draw on the key body, when the binding types something. */
   usage?: number;
@@ -81,6 +116,42 @@ export interface BindingFace {
   hold?: string;
   /** Draw the key recessed: it does nothing of its own (&trans, &none). */
   muted?: boolean;
+}
+
+/**
+ * Does `value` satisfy one of the descriptions the firmware gave? Inlined
+ * rather than imported from `../behaviors/parameters` (Float has no
+ * `behaviors/` directory) — kept byte-identical to that module's own
+ * `validateValue`, which remains the copy the behavior editor uses.
+ */
+function validateValue(
+  layerIds: number[],
+  value?: number,
+  values?: BehaviorParameterValueDescription[]
+): boolean {
+  if (value === undefined) {
+    return values === undefined || values?.length === 0 || !!values[0].nil;
+  }
+
+  const matchingValue = values?.find((v) => {
+    if (v.constant !== undefined) {
+      return v.constant == value;
+    } else if (v.range) {
+      return value >= v.range.min && value <= v.range.max;
+    } else if (v.hidUsage) {
+      const [page, id] = hid_usage_page_and_id_from_usage(value);
+      return page !== 0 && id !== 0;
+    } else if (v.layerId) {
+      return layerIds.includes(value);
+    } else if (v.nil) {
+      return value === 0;
+    } else {
+      console.error("Unknown check type!");
+      return false;
+    }
+  });
+
+  return !!matchingValue || (value === 0 && (!values || values.length === 0));
 }
 
 const accepts = (
@@ -170,7 +241,7 @@ function constantLabel(
  * named. All three want the same answer, and it matches how the panel itself
  * numbers its slots (`Slot 3` / `&dmac 3`).
  */
-function macroLabel(slot: number, names: MacroNames): string {
+function macroLabel(slot: number, names: MacroNameLookup): string {
   const name = names?.[slot];
   return name ? clip(name, MAX_BODY_LABEL) : `M${slot}`;
 }
@@ -182,13 +253,14 @@ function macroLabel(slot: number, names: MacroNames): string {
  *
  * `macroNames` is the read side of MacroNamesContext (null until a v2-capable
  * keyboard's macros panel has been read); omitting it just means every macro
- * key draws `M<N>`.
+ * key draws `M<N>` — which is exactly what Float's caller gets today, since it
+ * has no such context to pass one from.
  */
 export function resolveBindingFace(
   binding: BehaviorBinding,
-  behavior: GetBehaviorDetailsResponse | undefined,
+  behavior: BehaviorFaceSource | undefined,
   layers: LayerRef[],
-  macroNames: MacroNames = null
+  macroNames: MacroNameLookup = null
 ): BindingFace {
   const muted = behavior ? MUTED_BEHAVIORS.has(behavior.displayName) : false;
 

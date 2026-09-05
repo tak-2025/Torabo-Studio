@@ -1,6 +1,7 @@
-// Ported from Torabo-Float/src/keyboard/legends.ts. The table and the decoding
-// rules are shared with Torabo-Float (src + web/src) and Torabo-Key-App —
-// 4 コピーが同一。変更時は全部同期すること。
+// Translated verbatim into Torabo-Float (`shared/keyboard/legends.ts`, see
+// PLAN-translators.md フェーズ②) and, from there, into Torabo-Key-App. This is
+// the single source — edit here, then run each downstream repo's
+// `npm run translate`.
 //
 // Layout-aware key legends + ZMK param1 modifier decoding.
 //
