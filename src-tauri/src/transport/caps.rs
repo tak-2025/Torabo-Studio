@@ -24,7 +24,7 @@ async fn caps_characteristic(state: &ActiveConnection<'_>) -> Result<Characteris
     let service = device
         .discover_services_with_uuid(CAPS_SVC_UUID)
         .await
-        .map_err(|e| format!("Failed to discover capability service: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover capability service: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| "Capability service not found (firmware predates it)".to_string())?;
@@ -32,7 +32,7 @@ async fn caps_characteristic(state: &ActiveConnection<'_>) -> Result<Characteris
     let chrc = service
         .discover_characteristics_with_uuid(CAPS_VAL_UUID)
         .await
-        .map_err(|e| format!("Failed to discover capability characteristic: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover capability characteristic: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| "Capability characteristic not found".to_string())?;
@@ -47,5 +47,5 @@ pub async fn torabo_read_caps(state: State<'_, ActiveConnection<'_>>) -> Result<
     let chrc = caps_characteristic(&state).await?;
     chrc.read()
         .await
-        .map_err(|e| format!("Failed to read capabilities: {}", e.message()))
+        .map_err(|e| format!("Failed to read capabilities: {}", super::err_text(&e)))
 }

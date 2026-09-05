@@ -26,7 +26,7 @@ async fn macro_characteristic(state: &ActiveConnection<'_>) -> Result<Characteri
     let service = device
         .discover_services_with_uuid(DM_SVC_UUID)
         .await
-        .map_err(|e| format!("Failed to discover dynamic-macro service: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover dynamic-macro service: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| {
@@ -38,7 +38,7 @@ async fn macro_characteristic(state: &ActiveConnection<'_>) -> Result<Characteri
     let chrc = service
         .discover_characteristics_with_uuid(DM_MACRO_UUID)
         .await
-        .map_err(|e| format!("Failed to discover dynamic-macro characteristic: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover dynamic-macro characteristic: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| "Dynamic-macro characteristic not found".to_string())?;
@@ -52,7 +52,7 @@ pub async fn dmac_read_all(state: State<'_, ActiveConnection<'_>>) -> Result<Vec
     let chrc = macro_characteristic(&state).await?;
     chrc.read()
         .await
-        .map_err(|e| format!("Failed to read dynamic macros: {}", e.message()))
+        .map_err(|e| format!("Failed to read dynamic macros: {}", super::err_text(&e)))
 }
 
 /// Write one slot (raw bytes: version, slot, len, steps). Applies live + NVS.
@@ -65,7 +65,7 @@ pub async fn dmac_write_slot(
     if let InvokeBody::Raw(data) = req.body() {
         chrc.write(data.as_slice())
             .await
-            .map_err(|e| format!("Failed to write dynamic macro slot: {}", e.message()))
+            .map_err(|e| format!("Failed to write dynamic macro slot: {}", super::err_text(&e)))
     } else {
         Err("dmac_write_slot expects a raw byte body".to_string())
     }

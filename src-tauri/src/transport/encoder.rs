@@ -33,7 +33,7 @@ async fn cfg_characteristic(state: &ActiveConnection<'_>) -> Result<Characterist
     let service = device
         .discover_services_with_uuid(ENC_SVC_UUID)
         .await
-        .map_err(|e| format!("Failed to discover encoder service: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover encoder service: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| {
@@ -45,7 +45,7 @@ async fn cfg_characteristic(state: &ActiveConnection<'_>) -> Result<Characterist
     let chrc = service
         .discover_characteristics_with_uuid(ENC_CFG_UUID)
         .await
-        .map_err(|e| format!("Failed to discover encoder characteristic: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover encoder characteristic: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| "Encoder config characteristic not found".to_string())?;
@@ -61,7 +61,7 @@ pub async fn encoder_read_config(
     let chrc = cfg_characteristic(&state).await?;
     chrc.read()
         .await
-        .map_err(|e| format!("Failed to read encoder config: {}", e.message()))
+        .map_err(|e| format!("Failed to read encoder config: {}", super::err_text(&e)))
 }
 
 /// Write a new encoder config blob (raw bytes). Applies live + persists to NVS.
@@ -75,7 +75,7 @@ pub async fn encoder_write_config(
         // Fits in one ATT write; the firmware rejects a fragmented write outright.
         chrc.write(data.as_slice())
             .await
-            .map_err(|e| format!("Failed to write encoder config: {}", e.message()))
+            .map_err(|e| format!("Failed to write encoder config: {}", super::err_text(&e)))
     } else {
         Err("encoder_write_config expects a raw byte body".to_string())
     }

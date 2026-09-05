@@ -26,7 +26,7 @@ async fn combo_characteristic(state: &ActiveConnection<'_>) -> Result<Characteri
     let service = device
         .discover_services_with_uuid(CB_SVC_UUID)
         .await
-        .map_err(|e| format!("Failed to discover dynamic-combo service: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover dynamic-combo service: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| {
@@ -38,7 +38,7 @@ async fn combo_characteristic(state: &ActiveConnection<'_>) -> Result<Characteri
     let chrc = service
         .discover_characteristics_with_uuid(CB_COMBO_UUID)
         .await
-        .map_err(|e| format!("Failed to discover dynamic-combo characteristic: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover dynamic-combo characteristic: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| "Dynamic-combo characteristic not found".to_string())?;
@@ -52,7 +52,7 @@ pub async fn combo_read_all(state: State<'_, ActiveConnection<'_>>) -> Result<Ve
     let chrc = combo_characteristic(&state).await?;
     chrc.read()
         .await
-        .map_err(|e| format!("Failed to read dynamic combos: {}", e.message()))
+        .map_err(|e| format!("Failed to read dynamic combos: {}", super::err_text(&e)))
 }
 
 /// Write one combo (raw bytes: version, slot, 26-byte slot). Applies live + NVS.
@@ -65,7 +65,7 @@ pub async fn combo_write_slot(
     if let InvokeBody::Raw(data) = req.body() {
         chrc.write(data.as_slice())
             .await
-            .map_err(|e| format!("Failed to write dynamic combo slot: {}", e.message()))
+            .map_err(|e| format!("Failed to write dynamic combo slot: {}", super::err_text(&e)))
     } else {
         Err("combo_write_slot expects a raw byte body".to_string())
     }

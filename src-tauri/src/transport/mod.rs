@@ -10,7 +10,38 @@ pub mod timing;
 pub mod trackball;
 pub mod trackpad;
 
-use bluest::Characteristic;
+use bluest::{Characteristic, Error};
+
+/// Describe a bluest error well enough to act on it.
+///
+/// `Error::message()` is frequently the EMPTY STRING on Windows/WinRT: the
+/// underlying HRESULT carries no text and bluest passes that straight through.
+/// Every message in this module was built from `message()` alone, so a save
+/// that failed mid-transfer surfaced as
+/// "Failed to write config chunk 5/5 (104 bytes at offset 976): " — nothing
+/// after the colon, in the one place a reason was needed.
+///
+/// `ErrorKind` is always present and is the part that actually distinguishes
+/// the faults worth telling apart here ("the Bluetooth device isn't
+/// connected" — the link dropped — from "protocol error: ..." — the firmware
+/// rejected the write, with the ATT code named). Its `Display` already spells
+/// all of them out, including the ATT error inside `Protocol`, so it leads;
+/// the message and the underlying OS error are appended only when they have
+/// something to add. The result is never empty.
+pub(crate) fn err_text(e: &Error) -> String {
+    use std::error::Error as _;
+
+    let kind = e.kind().to_string();
+    let msg = e.message().trim().to_string();
+    let source = e.source().map(|s| s.to_string()).unwrap_or_default();
+
+    match (msg.is_empty(), source.is_empty()) {
+        (true, true) => kind,
+        (false, true) => format!("{}: {}", kind, msg),
+        (true, false) => format!("{} ({})", kind, source),
+        (false, false) => format!("{}: {} ({})", kind, msg, source),
+    }
+}
 
 /// Conservative single-write payload used when the OS/driver can't report a
 /// per-characteristic max write length. 180 stays safely under any negotiated
@@ -41,7 +72,7 @@ pub(crate) async fn write_chunked(chrc: &Characteristic, data: &[u8]) -> Result<
         return chrc
             .write(data)
             .await
-            .map_err(|e| format!("Failed to write config: {}", e.message()));
+            .map_err(|e| format!("Failed to write config: {}", err_text(&e)));
     }
 
     let total = (data.len() + chunk - 1) / chunk;
@@ -53,7 +84,7 @@ pub(crate) async fn write_chunked(chrc: &Characteristic, data: &[u8]) -> Result<
                 total,
                 part.len(),
                 i * chunk,
-                e.message()
+                err_text(&e)
             )
         })?;
     }

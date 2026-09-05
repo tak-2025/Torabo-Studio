@@ -20,8 +20,39 @@ import {
  * because Rust caches the connection instead.
  */
 
+/**
+ * Describe a thrown value well enough to act on it.
+ *
+ * `e.message` alone was not enough, and the save failure that prompted this
+ * proved it: the user got "…(chunk 5/5, 104 bytes): " with NOTHING after the
+ * colon, because the transport rejected with an exception whose `message` was
+ * the empty string. Which exception it was is the entire diagnosis — a
+ * `NetworkError` says the link dropped, `NotSupportedError` says the write was
+ * refused, `InvalidStateError` says the characteristic went stale — and all
+ * three were being reported identically, as silence.
+ *
+ * So the `name` leads (every DOMException has one, and it is the part that
+ * names the fault), the message follows only when it adds something, and
+ * `code` comes along when the browser set one. An error with a message and no
+ * useful name still reads exactly as it did before.
+ */
 function errText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
+  if (!(e instanceof Error)) return String(e);
+
+  const name = e.name && e.name !== "Error" ? e.name : "";
+  const msg = e.message?.trim() ?? "";
+  // DOMException.code: legacy, often 0, and only worth printing when it is not.
+  const code =
+    typeof (e as DOMException).code === "number" && (e as DOMException).code
+      ? ` (code ${(e as DOMException).code})`
+      : "";
+
+  if (name && msg) return `${name}: ${msg}${code}`;
+  if (name) return `${name}${code}`;
+  if (msg) return `${msg}${code}`;
+  // Nothing to say at all — still better than an empty string, which reads as
+  // a bug in the message rather than a fault on the link.
+  return `${e.constructor?.name ?? "Error"} (no details)${code}`;
 }
 
 /**

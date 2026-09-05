@@ -33,7 +33,7 @@ async fn cfg_characteristic(state: &ActiveConnection<'_>) -> Result<Characterist
     let service = device
         .discover_services_with_uuid(LED_SVC_UUID)
         .await
-        .map_err(|e| format!("Failed to discover led service: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover led service: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| {
@@ -45,7 +45,7 @@ async fn cfg_characteristic(state: &ActiveConnection<'_>) -> Result<Characterist
     let chrc = service
         .discover_characteristics_with_uuid(LED_CFG_UUID)
         .await
-        .map_err(|e| format!("Failed to discover led characteristic: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover led characteristic: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| "LED config characteristic not found".to_string())?;
@@ -61,7 +61,7 @@ pub async fn led_read_config(
     let chrc = cfg_characteristic(&state).await?;
     chrc.read()
         .await
-        .map_err(|e| format!("Failed to read led config: {}", e.message()))
+        .map_err(|e| format!("Failed to read led config: {}", super::err_text(&e)))
 }
 
 /// Write a new led config blob (raw bytes). Applies live + persists to NVS.
@@ -75,7 +75,7 @@ pub async fn led_write_config(
         // Fits in one ATT write; the firmware rejects a fragmented write outright.
         chrc.write(data.as_slice())
             .await
-            .map_err(|e| format!("Failed to write led config: {}", e.message()))
+            .map_err(|e| format!("Failed to write led config: {}", super::err_text(&e)))
     } else {
         Err("led_write_config expects a raw byte body".to_string())
     }

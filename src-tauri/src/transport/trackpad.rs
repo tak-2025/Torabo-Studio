@@ -30,7 +30,7 @@ async fn cfg_characteristic(state: &ActiveConnection<'_>) -> Result<Characterist
     let service = device
         .discover_services_with_uuid(TP_SVC_UUID)
         .await
-        .map_err(|e| format!("Failed to discover trackpad service: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover trackpad service: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| {
@@ -42,7 +42,7 @@ async fn cfg_characteristic(state: &ActiveConnection<'_>) -> Result<Characterist
     let chrc = service
         .discover_characteristics_with_uuid(TP_CFG_UUID)
         .await
-        .map_err(|e| format!("Failed to discover trackpad characteristic: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover trackpad characteristic: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| "Trackpad config characteristic not found".to_string())?;
@@ -58,7 +58,7 @@ pub async fn trackpad_read_config(
     let chrc = cfg_characteristic(&state).await?;
     chrc.read()
         .await
-        .map_err(|e| format!("Failed to read trackpad config: {}", e.message()))
+        .map_err(|e| format!("Failed to read trackpad config: {}", super::err_text(&e)))
 }
 
 /// Write a new trackpad config blob (raw bytes). Applies live + persists to NVS.

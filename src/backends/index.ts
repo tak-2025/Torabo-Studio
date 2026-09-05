@@ -4,6 +4,7 @@ import { isTauri } from "./types";
 import { tauriBackend } from "./tauri";
 import { hasBleDevice } from "./tauri/device";
 import { webFiles } from "./webble/files";
+import { onLink, resetLinkQueue } from "./linkQueue";
 
 export type {
   AvailableDevice,
@@ -15,6 +16,7 @@ export type {
   ToraboConfigBackend,
 } from "./types";
 export { isTauri, BACKUP_FILTERS, KEYMAP_FILTERS } from "./types";
+export { linkBusy } from "./linkQueue";
 
 /**
  * The single place that decides which backend the app is talking through, and
@@ -49,6 +51,11 @@ let registered: ToraboBackend | null = null;
  */
 export function registerBackend(backend: ToraboBackend | null): void {
   registered = backend;
+  // A connection boundary: anything still outstanding belongs to a link that
+  // is gone (or to no link at all), and the queue must not make the new
+  // connection wait behind an operation that may never settle. See
+  // linkQueue.ts's `resetLinkQueue`.
+  resetLinkQueue();
 }
 
 /**
@@ -70,7 +77,10 @@ export function registeredBackend(): ToraboBackend | null {
  * the old one, leaving the panels with nothing to talk to.
  */
 export function unregisterBackend(backend: ToraboBackend): void {
-  if (registered === backend) registered = null;
+  if (registered === backend) {
+    registered = null;
+    resetLinkQueue();
+  }
 }
 
 export function activeBackend(): ToraboBackend {
@@ -102,6 +112,10 @@ let tauriGattOwner: object | null = null;
 export async function refreshTauriGattAccess(owner: object): Promise<boolean> {
   tauriGatt = isTauri() ? await hasBleDevice() : false;
   tauriGattOwner = tauriGatt ? owner : null;
+  // Same connection boundary as registerBackend: the desktop BLE route is
+  // established here rather than by registering a backend, so this is where
+  // its queue starts clean.
+  resetLinkQueue();
   return tauriGatt;
 }
 
@@ -117,6 +131,7 @@ export function clearTauriGattAccess(owner: object): void {
   if (tauriGattOwner !== owner) return;
   tauriGatt = false;
   tauriGattOwner = null;
+  resetLinkQueue();
 }
 
 /** True when the torabo settings are reachable right now, by any route. */
@@ -126,39 +141,56 @@ export function hasConfigAccess(): boolean {
 
 // --- Config services --------------------------------------------------------
 // Thin pass-throughs so panels keep their existing call sites unchanged.
+//
+// Every one of them goes through `onLink` (./linkQueue.ts), which is the whole
+// reason that module exists: these services share ONE ATT link, and a second
+// operation started while another is mid-flight does not run beside it — it
+// interleaves. For a config split into chunks that means a gap between two of
+// them, and past 2000 ms the firmware throws away everything it had staged.
+// The queue makes each call below one indivisible turn, so a background read
+// can no longer land between chunk 4 and chunk 5 of a save. See linkQueue.ts
+// for why `waitForRpcIdle()` did not already cover this.
+//
+// Wrapping HERE rather than inside a backend is deliberate: this is the only
+// door the panels use, so the browser, desktop-native and RPC-tunnel routes
+// are all covered by the same few lines.
 
-export const toraboReadCaps = async () => activeBackend().toraboReadCaps();
+export const toraboReadCaps = async () =>
+  onLink(() => activeBackend().toraboReadCaps());
 
 export const trackballReadConfig = async () =>
-  activeBackend().trackballReadConfig();
+  onLink(() => activeBackend().trackballReadConfig());
 export const trackballWriteConfig = async (d: Uint8Array) =>
-  activeBackend().trackballWriteConfig(d);
+  onLink(() => activeBackend().trackballWriteConfig(d));
 
 export const trackpadReadConfig = async () =>
-  activeBackend().trackpadReadConfig();
+  onLink(() => activeBackend().trackpadReadConfig());
 export const trackpadWriteConfig = async (d: Uint8Array) =>
-  activeBackend().trackpadWriteConfig(d);
+  onLink(() => activeBackend().trackpadWriteConfig(d));
 
 export const encoderReadConfig = async () =>
-  activeBackend().encoderReadConfig();
+  onLink(() => activeBackend().encoderReadConfig());
 export const encoderWriteConfig = async (d: Uint8Array) =>
-  activeBackend().encoderWriteConfig(d);
+  onLink(() => activeBackend().encoderWriteConfig(d));
 
-export const ledReadConfig = async () => activeBackend().ledReadConfig();
+export const ledReadConfig = async () =>
+  onLink(() => activeBackend().ledReadConfig());
 export const ledWriteConfig = async (d: Uint8Array) =>
-  activeBackend().ledWriteConfig(d);
+  onLink(() => activeBackend().ledWriteConfig(d));
 
-export const timingReadConfig = async () => activeBackend().timingReadConfig();
+export const timingReadConfig = async () =>
+  onLink(() => activeBackend().timingReadConfig());
 export const timingWriteConfig = async (d: Uint8Array) =>
-  activeBackend().timingWriteConfig(d);
+  onLink(() => activeBackend().timingWriteConfig(d));
 
-export const dmacReadAll = async () => activeBackend().dmacReadAll();
+export const dmacReadAll = async () => onLink(() => activeBackend().dmacReadAll());
 export const dmacWriteSlot = async (d: Uint8Array) =>
-  activeBackend().dmacWriteSlot(d);
+  onLink(() => activeBackend().dmacWriteSlot(d));
 
-export const comboReadAll = async () => activeBackend().comboReadAll();
+export const comboReadAll = async () =>
+  onLink(() => activeBackend().comboReadAll());
 export const comboWriteSlot = async (d: Uint8Array) =>
-  activeBackend().comboWriteSlot(d);
+  onLink(() => activeBackend().comboWriteSlot(d));
 
 // --- Files ------------------------------------------------------------------
 // Resolved against the platform, not the registered backend: opening a backup to

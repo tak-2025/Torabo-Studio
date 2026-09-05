@@ -1,3 +1,4 @@
+import { linkBusy } from "../backends/linkQueue";
 import {
   Request,
   RequestResponse,
@@ -183,6 +184,27 @@ export function rpcBusy(): boolean {
 }
 
 /**
+ * True while the link is carrying anything a caller should keep out of the way
+ * of — an RPC exchange OR a torabo config read/write.
+ *
+ * The config half used to be missing, and the omission had teeth: a config
+ * exchange never touches `inFlight`, so during a five-chunk GATT save this
+ * function's predecessor reported the link perfectly idle and `waitForRpcIdle`
+ * released a background reader straight into the middle of the transfer.
+ * backends/linkQueue.ts now stops that read from interleaving whatever this
+ * says, but a guard whose whole job is "is the link busy?" should not be
+ * answering no while it is saturated — a caller that waits here should still
+ * be waiting for the real thing, not merely be caught by the net downstream.
+ *
+ * Safe to consult from anywhere EXCEPT inside a queued config operation:
+ * `linkBusy()` is true for the operation asking, so waiting on it from in
+ * there would wait on itself. Nothing under backends/ imports this module.
+ */
+function linkOccupied(): boolean {
+  return inFlight > 0 || linkBusy();
+}
+
+/**
  * Resolve once no RPC call has been outstanding for `quietMs`.
  *
  * Gives up after `maxWaitMs` and resolves anyway: a caller that waits forever
@@ -194,7 +216,7 @@ export async function waitForRpcIdle(
 ): Promise<void> {
   const deadline = Date.now() + maxWaitMs;
   for (;;) {
-    const quietFor = inFlight > 0 ? 0 : Date.now() - lastSettledAt;
+    const quietFor = linkOccupied() ? 0 : Date.now() - lastSettledAt;
     if (quietFor >= quietMs) return;
     if (Date.now() >= deadline) return;
     await new Promise((r) => setTimeout(r, Math.min(250, quietMs)));

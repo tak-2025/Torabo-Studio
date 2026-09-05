@@ -39,7 +39,7 @@ async fn cfg_characteristic(state: &ActiveConnection<'_>) -> Result<Characterist
     let service = device
         .discover_services_with_uuid(TMG_SVC_UUID)
         .await
-        .map_err(|e| format!("Failed to discover timing service: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover timing service: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| {
@@ -51,7 +51,7 @@ async fn cfg_characteristic(state: &ActiveConnection<'_>) -> Result<Characterist
     let chrc = service
         .discover_characteristics_with_uuid(TMG_CFG_UUID)
         .await
-        .map_err(|e| format!("Failed to discover timing characteristic: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover timing characteristic: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| "Timing config characteristic not found".to_string())?;
@@ -67,7 +67,7 @@ pub async fn timing_read_config(
     let chrc = cfg_characteristic(&state).await?;
     chrc.read()
         .await
-        .map_err(|e| format!("Failed to read timing config: {}", e.message()))
+        .map_err(|e| format!("Failed to read timing config: {}", super::err_text(&e)))
 }
 
 /// Write a new timing config blob (raw bytes, 96B). Applies live + persists to NVS.

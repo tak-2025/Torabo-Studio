@@ -28,7 +28,7 @@ async fn cfg_characteristic(state: &ActiveConnection<'_>) -> Result<Characterist
     let service = device
         .discover_services_with_uuid(TB_SVC_UUID)
         .await
-        .map_err(|e| format!("Failed to discover trackball service: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover trackball service: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| {
@@ -40,7 +40,7 @@ async fn cfg_characteristic(state: &ActiveConnection<'_>) -> Result<Characterist
     let chrc = service
         .discover_characteristics_with_uuid(TB_CFG_UUID)
         .await
-        .map_err(|e| format!("Failed to discover trackball characteristic: {}", e.message()))?
+        .map_err(|e| format!("Failed to discover trackball characteristic: {}", super::err_text(&e)))?
         .get(0)
         .cloned()
         .ok_or_else(|| "Trackball config characteristic not found".to_string())?;
@@ -56,7 +56,7 @@ pub async fn trackball_read_config(
     let chrc = cfg_characteristic(&state).await?;
     chrc.read()
         .await
-        .map_err(|e| format!("Failed to read trackball config: {}", e.message()))
+        .map_err(|e| format!("Failed to read trackball config: {}", super::err_text(&e)))
 }
 
 /// Write a new config blob (raw bytes). Applies live + persists to NVS on the FW.
@@ -69,7 +69,7 @@ pub async fn trackball_write_config(
     if let InvokeBody::Raw(data) = req.body() {
         chrc.write(data.as_slice())
             .await
-            .map_err(|e| format!("Failed to write trackball config: {}", e.message()))
+            .map_err(|e| format!("Failed to write trackball config: {}", super::err_text(&e)))
     } else {
         Err("trackball_write_config expects a raw byte body".to_string())
     }
