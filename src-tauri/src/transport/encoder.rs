@@ -6,8 +6,21 @@
 //! (torabo-tsuki_ext_FW encoder/include/zmk_encoder_config/config.h); the frontend
 //! (src/encoder/encConfig.ts) encodes/decodes it.
 //!
-//! Unlike the trackpad the wire is tiny (4 + layers*12 ≈ 124 B), so it always fits
-//! in a single ATT write — no chunking, and the firmware rejects offset != 0.
+//! The wire is 4 + layers*12 bytes, which passes one ATT MTU as the layer count
+//! grows (20 layers = 244 B, and the negotiated MTU-3 is smaller than that on
+//! plenty of links). bluest's `write()` is a SINGLE ATT write and Windows/WinRT
+//! does not reliably promote an oversized payload into an ATT Write Long, so
+//! writes go through `super::write_chunked` exactly as trackpad and timing
+//! already do. The firmware reassembles those consecutive offset==0 chunks:
+//! the torabo-tsuki_ext_FW change that moved this service's write handler onto
+//! the shared `torabo_wire_asm` chunk-reassembly buffer and added
+//! BT_GATT_PERM_PREPARE_WRITE to the attribute. That same change brought the
+//! client-driven windowed READ, which the caps header advertises as
+//! TORABO_CAPS_HDR_WINDOW_READ (`_rsv` byte 7, bit2 = 0x04) — so the bit is the
+//! stable way to ask whether this firmware reassembles chunks, and older
+//! firmware without it fails a split write's second chunk with
+//! BT_ATT_ERR_INVALID_OFFSET. Nothing else changed with it — same GATT layout,
+//! same wire bytes, same length rules, same exact-length apply check.
 //!
 //! UUIDs match the firmware (allocated after trackball e1f4a900 / macros e1f4aa00 /
 //! combos e1f4ab00 / trackpad e1f4ac00):
@@ -72,10 +85,11 @@ pub async fn encoder_write_config(
 ) -> Result<(), String> {
     let chrc = cfg_characteristic(&state).await?;
     if let InvokeBody::Raw(data) = req.body() {
-        // Fits in one ATT write; the firmware rejects a fragmented write outright.
-        chrc.write(data.as_slice())
-            .await
-            .map_err(|e| format!("Failed to write encoder config: {}", super::err_text(&e)))
+        // May exceed the negotiated ATT MTU-3 once enough layers are in play, so
+        // chunk it the same way trackpad does (see super::write_chunked); the
+        // firmware reassembles either way once it advertises the caps-header
+        // WINDOW_READ bit (see the module doc).
+        super::write_chunked(&chrc, data.as_slice()).await
     } else {
         Err("encoder_write_config expects a raw byte body".to_string())
     }

@@ -48,10 +48,15 @@ export const ja: Dict = {
     "ブラウザが ATT の上限 512 バイトで読み取りを打ち切った可能性があります。",
   "sys.cfg.readShort.mismatch":
     "ファームウェアとアプリのバージョンが合っていない可能性があります。",
+  // The USB advice is about OLD firmware only. {label} の分割書き込み受信
+  // （チャンク再組み立て）に対応した FW ならこのメッセージには到達しない
+  // ので、「BLE では保存できない」を言い切らないこと。
   "sys.cfg.tooLarge":
-    "{label} が {bytes} バイトあり、512 バイトを超えています。" +
-    "このファームウェアはブラウザからの分割書き込みに対応していません" +
-    "（デスクトップ版アプリからの保存をお試しください）。",
+    "{label} が {bytes} バイトあり、1 回の書き込み上限 {max} バイトを超えています。" +
+    "分割書き込み（チャンク受信）に対応したファームウェアなら分割して保存できますが、" +
+    "それ以前のファームウェアの {label} は BLE 経由では保存できません。" +
+    "その場合はキーボードのファームウェアを更新するか、USB 接続で保存してください" +
+    "（レイヤー数を増やすと wire が長くなる点にご注意ください）。",
   "sys.cfg.writeFailed":
     "{label} の書き込みに失敗しました" +
     "（チャンク {n}/{total}, {bytes} バイト）: {error}",
@@ -154,9 +159,15 @@ export const en: Dict = {
     "The browser may have cut the read short at the 512-byte ATT limit.",
   "sys.cfg.readShort.mismatch":
     "The firmware and the app may be different versions.",
+  // The USB advice is about OLD firmware only: firmware that reassembles
+  // chunked {label} writes never reaches this message, so do not state
+  // "cannot be saved over BLE" as a blanket fact.
   "sys.cfg.tooLarge":
-    "{label} is {bytes} bytes, over the 512-byte limit. This firmware cannot " +
-    "take a split write from the browser — try saving from the desktop app.",
+    "{label} is {bytes} bytes, over the {max}-byte limit for a single write. " +
+    "Firmware that reassembles chunked writes takes it split; firmware older " +
+    "than that cannot save this {label} over BLE at all. On that firmware, " +
+    "update the keyboard's firmware or connect over USB to save it. Note that " +
+    "adding layers makes the wire longer.",
   "sys.cfg.writeFailed":
     "Failed to write {label} (chunk {n}/{total}, {bytes} bytes): {error}",
 
