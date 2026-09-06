@@ -282,20 +282,30 @@ export default function Keyboard() {
     [undoRedo, selectedPhysicalLayoutIndex]
   );
 
+  /**
+   * Apply the picker's new binding, and say whether it actually landed.
+   *
+   * The boolean is the picker's rollback contract (BindingChangeResult in
+   * BehaviorBindingPicker.tsx): a keyboard that refuses setLayerBinding used to
+   * leave the picker showing the rejected choice, so the user read a refusal as
+   * a save. Now the picker puts its dropdowns back to the binding that is
+   * really on the keyboard.
+   */
   let doUpdateBinding = useCallback(
-    (binding: BehaviorBinding) => {
+    async (binding: BehaviorBinding): Promise<boolean> => {
       if (!keymap || selectedKeyPosition === undefined) {
         console.error(
           "Can't update binding without a selected key position and loaded keymap"
         );
-        return;
+        return false;
       }
 
       const layer = selectedLayerIndex;
       const layerId = keymap.layers[layer].id;
       const keyPosition = selectedKeyPosition;
       const oldBinding = keymap.layers[layer].bindings[keyPosition];
-      undoRedo?.(async () => {
+      let applied = false;
+      await undoRedo?.(async () => {
         if (!conn.conn) {
           throw new Error("Not connected");
         }
@@ -308,6 +318,7 @@ export default function Keyboard() {
           resp.keymap?.setLayerBinding ===
           SetLayerBindingResponse.SET_LAYER_BINDING_RESP_OK
         ) {
+          applied = true;
           setKeymap(
             produce((draft: any) => {
               draft.layers[layer].bindings[keyPosition] = binding;
@@ -340,6 +351,7 @@ export default function Keyboard() {
           }
         };
       });
+      return applied;
     },
     [conn, keymap, undoRedo, selectedLayerIndex, selectedKeyPosition]
   );

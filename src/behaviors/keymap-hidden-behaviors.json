@@ -1,5 +1,5 @@
 {
-  "_comment": "Behaviors the firmware reports but that should not be offered in the keymap editor. Two reasons appear here: some cannot sensibly go on a key at all (the trackball's internal move/scroll, the encoder's sensor behavior), and some are dead in THIS build's configuration. Keyed by the firmware's display name. They still exist on the device — this only stops them being offered as a choice, and a binding that already uses one is still shown, so an existing keymap is never silently rewritten. If a build ever turns these options back on, delete the entry.",
+  "_comment": "Behaviors the firmware reports but that should not be offered by BehaviorBindingPicker — the keymap editor today, and anything else that mounts the same component: a sensor behavior is no more useful on one binding than on another. Two reasons appear here: some cannot sensibly go on a key at all (the trackball's internal move/scroll, the encoder's sensor behavior), and some are dead in THIS build's configuration. Keyed by the firmware's display name. They still exist on the device — this only stops them being offered as a choice, and a binding that already uses one is still shown, so an existing keymap is never silently rewritten. If a build ever turns these options back on, delete the entry.",
   "hidden": [
     {
       "name": "mouse_move",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   GetBehaviorDetailsResponse,
@@ -7,23 +7,55 @@ import {
 import { BehaviorBinding } from "@zmkfirmware/zmk-studio-ts-client/keymap";
 import { BehaviorParametersPicker } from "./BehaviorParametersPicker";
 import { validateValue } from "./parameters";
+import { BindingChangeResult, settleBindingChange } from "./bindingChange";
 import { useI18n } from "../i18n";
 import BehaviorGuides from "./behavior-guides.json";
 import HiddenBehaviors from "./keymap-hidden-behaviors.json";
+
+export type { BindingChangeResult };
 
 export interface BehaviorBindingPickerProps {
   binding: BehaviorBinding;
   behaviors: GetBehaviorDetailsResponse[];
   layers: { id: number; name: string }[];
-  onBindingChanged: (binding: BehaviorBinding) => void;
+  /**
+   * Apply the change. Returning `false` (or resolving to it) rolls the picker
+   * back — see BindingChangeResult. Before this contract existed the picker
+   * kept showing a selection the keyboard had rejected, and the user had no way
+   * to tell a saved binding from a refused one.
+   */
+  onBindingChanged: (binding: BehaviorBinding) => BindingChangeResult;
 }
 
-function validateBinding(
-  metadata: BehaviorBindingParametersSet[],
+/**
+ * Could this binding be valid for the selected behavior?
+ *
+ * Three cases, and the middle one is the point:
+ *
+ *   - `undefined` metadata: the firmware told us NOTHING about this behavior's
+ *     parameters. That is not a statement that it takes none — it is silence,
+ *     and this function cannot answer. It says so by accepting only a bare
+ *     0/0 binding and leaving the real verdict to the keyboard, which runs
+ *     zmk_behavior_validate_binding() on the write and rejects what it does not
+ *     like. sekigon's hires_dial_radial_controller_button is exactly this
+ *     case (its driver reports no parameter metadata).
+ *   - an EMPTY array: the behavior positively declares zero parameter sets, so
+ *     0/0 is right and anything else is not.
+ *   - a non-empty array: match the value against the declared sets, as before.
+ *
+ * The first two used to be one branch that answered `true` for both, which read
+ * as "valid" for a behavior nobody had validated.
+ */
+export function validateBinding(
+  metadata: BehaviorBindingParametersSet[] | undefined,
   layerIds: number[],
   param1?: number,
   param2?: number
 ): boolean {
+  if (metadata === undefined || metadata.length === 0) {
+    return !param1 && !param2;
+  }
+
   if (
     (param1 === undefined || param1 === 0) &&
     metadata.every((s) => !s.param1 || s.param1.length === 0)
@@ -31,7 +63,7 @@ function validateBinding(
     return true;
   }
 
-  let matchingSet = metadata.find((s) =>
+  const matchingSet = metadata.find((s) =>
     validateValue(layerIds, param1, s.param1)
   );
 
@@ -43,8 +75,11 @@ function validateBinding(
 }
 
 /** Behaviors the firmware reports but that cannot sensibly go on a key — the
- *  trackball's internal move/scroll and the encoder's sensor behavior. Offering
- *  them is a trap: assigning `mouse_move` to a key just makes the pointer drift.
+ *  trackball's internal move/scroll and the rotary devices' sensor behaviors.
+ *  Offering them is a trap: assigning `mouse_move` to a key just makes the
+ *  pointer drift. The dial tab's push-button picker is this same component and
+ *  wants the same list (a rotation behavior on a push does nothing either),
+ *  which is why the file is not named after the keymap alone any more.
  *  See keymap-hidden-behaviors.json for why each one is here. */
 const hiddenNames = new Set(
   (HiddenBehaviors.hidden as { name: string }[]).map((h) => h.name),
@@ -115,6 +150,14 @@ export const BehaviorBindingPicker = ({
     [behaviors, behaviorId, lang]
   );
 
+  // The confirmed binding, for the rollback below.
+  const bindingRef = useRef(binding);
+  bindingRef.current = binding;
+
+  // Which edit is the live one. A rollback from an earlier, slower write must
+  // not stomp on a later selection the user has already made.
+  const editSeq = useRef(0);
+
   useEffect(() => {
     if (
       binding.behaviorId === behaviorId &&
@@ -125,27 +168,43 @@ export const BehaviorBindingPicker = ({
     }
 
     if (!metadata) {
-      console.error(
-        "Can't find metadata for the selected behaviorId",
+      // Not fatal any more: a behavior the firmware describes no parameters for
+      // is still assignable, and the keyboard is the one that gets to refuse it.
+      console.warn(
+        "No parameter metadata for the selected behaviorId; letting the keyboard validate",
         behaviorId
       );
-      return;
     }
 
     if (
-      validateBinding(
+      !validateBinding(
         metadata,
         layers.map(({ id }) => id),
         param1,
         param2
       )
     ) {
+      return;
+    }
+
+    const seq = ++editSeq.current;
+    settleBindingChange(() =>
       onBindingChanged({
         behaviorId,
         param1: param1 || 0,
         param2: param2 || 0,
-      });
-    }
+      })
+    ).then((ok) => {
+      if (ok) return;
+      if (seq !== editSeq.current) return; // superseded by a newer edit
+      // Put the dropdowns back to what is really on the keyboard. Read through
+      // the ref because this runs after an await, by which time the closure's
+      // copy of the prop is a render old.
+      const b = bindingRef.current;
+      setBehaviorId(b.behaviorId);
+      setParam1(b.param1);
+      setParam2(b.param2);
+    });
   }, [behaviorId, param1, param2]);
 
   useEffect(() => {
