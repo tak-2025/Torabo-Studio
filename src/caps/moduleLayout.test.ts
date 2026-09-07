@@ -145,6 +145,21 @@ describe("deriveModuleLayout: the meta byte", () => {
     expect(layout.cells.every((c) => c.items.length === 0)).toBe(true);
   });
 
+  it("drops a phantom slot beside a described device", () => {
+    // A single-pad build reported device_count 2, the second one meta 0. It is
+    // an unconfigured slot, not a module: it belongs in neither a cell nor the
+    // unplaced list. Contrast the test above — an ALL-unknown wire is still
+    // listed in full, because there every device is real.
+    const layout = deriveModuleLayout(caps([{ id: Feature.Trackpad }]), [
+      { deviceId: 0, meta: meta(TpSide.Left, TpConn.Extension, TpKind.Trackpad) },
+      { deviceId: 1, meta: 0 },
+    ])!;
+    expect(keys(layout, TpSide.Left, TpConn.Extension)).toEqual([
+      "tp.kind.trackpad",
+    ]);
+    expect(layout.unplaced).toEqual([]);
+  });
+
   it("lists a half-described device rather than guessing the rest", () => {
     // Kind known, side not: it is a pad, somewhere. Placing it would invent the
     // half; dropping it would lose a device the keyboard actually reported.

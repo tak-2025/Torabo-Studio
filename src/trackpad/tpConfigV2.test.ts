@@ -40,6 +40,9 @@ import {
   defaultCoast,
   tpFirmwareReadbackSize,
   tpReadbackTooBig,
+  isPhantomDevice,
+  visibleDeviceIndices,
+  clampToVisibleDevice,
   type TpConfig,
   type TpBinding,
   type TpAxisCfg,
@@ -358,5 +361,88 @@ describe("tpReadbackTooBig", () => {
     expect(tpReadbackTooBig(sizedCfg(4), budget)).toBe(false);
     expect(tpReadbackTooBig(sizedCfg(3))).toBe(true);
     expect(tpReadbackTooBig(sizedCfg(4))).toBe(true);
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * Phantom wire slots.
+ *
+ * A single-pad build used to report device_count 2 with the second device's
+ * meta byte at 0, which the panel then offered as a selectable "デバイス 1"
+ * and the FW-info tab listed as an unplaced module. The rule below hides such
+ * a slot — but ONLY when some other device in the same wire described itself,
+ * because on pre-meta firmware every device reports 0 and every one is real.
+ * ------------------------------------------------------------------------- */
+
+/** 25 = side left, conn extension, kind trackpad — a described device. */
+const META_LEFT_EXT_PAD = 25;
+/** 9 = side left, conn extension, kind unknown — described only in part, but
+ * nonzero, so it is still a device the firmware told us about. */
+const META_HALF = 9;
+
+describe("phantom devices", () => {
+  const wire = (...metas: number[]) => metas.map((meta, i) => ({ deviceId: i, meta }));
+
+  it("shows every device when the firmware described none of them", () => {
+    // Pre-meta firmware: all-zero is not evidence of a phantom, it is evidence
+    // that this firmware cannot describe anything. Nothing may be hidden.
+    expect(visibleDeviceIndices(wire(0, 0))).toEqual([0, 1]);
+    expect(visibleDeviceIndices(wire(0))).toEqual([0]);
+    expect(visibleDeviceIndices(wire(0, 0, 0, 0))).toEqual([0, 1, 2, 3]);
+    expect(isPhantomDevice(wire(0, 0), 0)).toBe(false);
+    expect(isPhantomDevice(wire(0, 0), 1)).toBe(false);
+  });
+
+  it("hides the undescribed slot beside a described one", () => {
+    // The single-pad build's actual wire.
+    expect(visibleDeviceIndices(wire(META_LEFT_EXT_PAD, 0))).toEqual([0]);
+    expect(isPhantomDevice(wire(META_LEFT_EXT_PAD, 0), 1)).toBe(true);
+    expect(isPhantomDevice(wire(META_LEFT_EXT_PAD, 0), 0)).toBe(false);
+  });
+
+  it("hides it whichever slot it lands in", () => {
+    expect(visibleDeviceIndices(wire(0, META_LEFT_EXT_PAD))).toEqual([1]);
+    expect(visibleDeviceIndices(wire(0, META_LEFT_EXT_PAD, 0))).toEqual([1]);
+  });
+
+  it("keeps both when both said something, however little", () => {
+    expect(visibleDeviceIndices(wire(META_LEFT_EXT_PAD, META_HALF))).toEqual([0, 1]);
+    expect(isPhantomDevice(wire(META_LEFT_EXT_PAD, META_HALF), 1)).toBe(false);
+  });
+
+  it("has nothing to hide in an empty wire, and never hides everything", () => {
+    expect(visibleDeviceIndices(wire())).toEqual([]);
+    expect(isPhantomDevice(wire(), 0)).toBe(false);
+    // The rule needs a described device to call another one a phantom, so a
+    // non-empty wire always leaves at least one slot visible.
+    for (const metas of [[0], [0, 0], [META_LEFT_EXT_PAD, 0], [0, META_HALF]]) {
+      expect(visibleDeviceIndices(wire(...metas)).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("clamps a selection onto the visible slots", () => {
+    const hidden1 = wire(META_LEFT_EXT_PAD, 0);
+    expect(clampToVisibleDevice(hidden1, 1)).toBe(0); // off the phantom
+    expect(clampToVisibleDevice(hidden1, 0)).toBe(0); // already fine, untouched
+    const hidden0 = wire(0, META_LEFT_EXT_PAD);
+    expect(clampToVisibleDevice(hidden0, 0)).toBe(1);
+    expect(clampToVisibleDevice(hidden0, 1)).toBe(1);
+    // Out of range, and the degenerate empty wire.
+    expect(clampToVisibleDevice(wire(0, 0), 7)).toBe(0);
+    expect(clampToVisibleDevice(wire(), 3)).toBe(0);
+  });
+
+  it("is a DISPLAY filter: the re-encoded wire still carries every slot", () => {
+    // The trap this exists to avoid. encodeTp sizes the blob from
+    // cfg.devices.length, so dropping the phantom from the config would write
+    // a blob one device short of the one the firmware sent.
+    const cfg = sizedCfg(2, 20);
+    cfg.devices[0].meta = META_LEFT_EXT_PAD; // device 1 stays at 0 = phantom
+    expect(visibleDeviceIndices(cfg.devices)).toEqual([0]);
+    expect(cfg.devices.length).toBe(2);
+    const bytes = encodeTp(cfg);
+    expect(bytes[3]).toBe(2); // device_count, unchanged
+    expect(bytes.byteLength).toBe(1536);
+    expect(decodeTp(bytes).devices.map((d) => d.meta)).toEqual([META_LEFT_EXT_PAD, 0]);
   });
 });

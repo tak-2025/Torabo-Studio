@@ -99,7 +99,13 @@ import {
   moduleSlots,
 } from "./toraboCaps";
 import type { Msg } from "./fwInfo";
-import { TpConn, TpKind, TpSide, decodeMeta } from "../trackpad/tpConfigV2";
+import {
+  TpConn,
+  TpKind,
+  TpSide,
+  decodeMeta,
+  isPhantomDevice,
+} from "../trackpad/tpConfigV2";
 
 /** The two halves and the two connectors the grid is built from. Reusing the
  * trackpad wire's own vocabulary rather than a second set of names: they are
@@ -406,7 +412,14 @@ export function deriveModuleLayout(
   // got there first.
   const kindAt = new Map<string, number>();
   const cellKey = (side: LayoutSide, conn: LayoutConn) => `${side}:${conn}`;
-  for (const dev of devices ?? []) {
+  const wire = devices ?? [];
+  for (let d = 0; d < wire.length; d++) {
+    const dev = wire[d];
+    // A wire slot the firmware reported but never described, next to ones it
+    // did: not a module, so it belongs in neither a cell nor the unplaced
+    // list. See isPhantomDevice() in tpConfigV2.ts for why an ALL-unknown
+    // wire is still shown in full.
+    if (isPhantomDevice(wire, d)) continue;
     const { side, conn, kind } = decodeMeta(dev.meta);
     placedKinds.add(kind);
     if (isSide(side) && isConn(conn)) {

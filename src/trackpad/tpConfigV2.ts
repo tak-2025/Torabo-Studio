@@ -185,6 +185,59 @@ export function describeDevice(deviceId: number, meta: number, t: Translate): st
     : t("tp.device.fallback", { n: deviceId });
 }
 
+/* ---------------------------------------------------------------------------
+ * Phantom devices: wire slots the firmware reports but the build does not have.
+ *
+ * `device_count` in the header comes straight from the firmware, and a build
+ * with only ONE pad still reported 2 devices for a while, the second one with
+ * meta 0. That slot is not a device — it is an unconfigured slot — and showing
+ * it gives the user a "デバイス 1" they can select and edit to no effect.
+ *
+ * The firmware is being fixed to report only the devices it declares, but
+ * fielded firmware will keep sending the phantom, so hide it here too.
+ *
+ * The rule is deliberately narrow: meta 0 only means "phantom" when some OTHER
+ * device in the same wire DID describe itself. On firmware that predates the
+ * meta byte every device reports 0, and every one of them is real — an all-zero
+ * wire is therefore shown in full, exactly as before.
+ *
+ * DISPLAY ONLY. Nothing here may reach the config object that gets re-encoded:
+ * encodeTp() sizes the blob from cfg.devices.length, so dropping a slot would
+ * write a SHORTER blob than the firmware sent and shift every device after it.
+ * The write path must keep carrying every wire slot untouched.
+ * ------------------------------------------------------------------------- */
+
+/** The only field the phantom rule looks at; both TpDeviceCfg and the FW-info
+ * tab's LayoutDevice satisfy it. */
+type MetaBearing = { meta: number };
+
+/** True when device `i` is a slot the firmware reported but never described,
+ * in a wire where at least one other device WAS described. */
+export function isPhantomDevice(devices: readonly MetaBearing[], i: number): boolean {
+  const d = devices[i];
+  if (!d || (d.meta ?? 0) !== 0) return false;
+  return devices.some((o, j) => j !== i && (o.meta ?? 0) !== 0);
+}
+
+/**
+ * Wire-slot indices worth showing, in wire order. Always non-empty for a
+ * non-empty wire (a wire cannot be all-phantom: the rule needs a described
+ * device to call any other one a phantom).
+ */
+export function visibleDeviceIndices(devices: readonly MetaBearing[]): number[] {
+  return devices.map((_, i) => i).filter((i) => !isPhantomDevice(devices, i));
+}
+
+/** Clamp a selected wire slot onto the visible ones, keeping it if it already
+ * is one. Falls back to the first visible slot, or 0 for an empty wire. */
+export function clampToVisibleDevice(
+  devices: readonly MetaBearing[],
+  index: number,
+): number {
+  const visible = visibleDeviceIndices(devices);
+  return visible.includes(index) ? index : (visible[0] ?? 0);
+}
+
 /**
  * Inertial scroll, per device (v3). Only axes set to Scroll ever coast; a new
  * touch stops a glide at once, and a glide keeps running after the layer that

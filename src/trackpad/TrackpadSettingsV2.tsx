@@ -52,6 +52,8 @@ import {
   decodeTp,
   encodeTp,
   describeDevice,
+  clampToVisibleDevice,
+  visibleDeviceIndices,
   tpFirmwareReadbackSize,
   tpReadbackTooBig,
 } from "./tpConfigV2";
@@ -352,6 +354,14 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
     }
   }, [conn]);
 
+  // Belt as well as braces for the clamp in onRead: whatever puts a config in
+  // state, the selected slot is never a hidden one. A no-op (same value in,
+  // same value out) on every edit, so it cannot loop.
+  useEffect(() => {
+    if (!cfg) return;
+    setDev((d) => clampToVisibleDevice(cfg.devices, d));
+  }, [cfg]);
+
   const loadLayerInfo = useCallback(async () => {
     if (!conn) return;
     const info = await fetchLayerInfo(conn);
@@ -367,7 +377,9 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
         const c = decodeTp(await trackpadReadConfig());
         setCfg(c);
         setCustomAxes(new Set()); // fresh read: derive 機能 purely from the data
-        setDev((d) => Math.min(d, Math.max(0, c.devices.length - 1)));
+        // Not just "in range": a phantom slot is in range and must not be
+        // the one we land on. See visibleDeviceIndices() in tpConfigV2.ts.
+        setDev((d) => clampToVisibleDevice(c.devices, d));
       }),
     [loadLayerInfo, read]
   );
@@ -398,6 +410,10 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
     );
   }
 
+  // Wire slots the user gets to see and pick between. The config object itself
+  // keeps every slot — encodeTp() sizes the blob from cfg.devices.length, so
+  // the write path has to carry the phantom back untouched.
+  const visible = cfg ? visibleDeviceIndices(cfg.devices) : [];
   const device = cfg?.devices[dev];
   // How many layers to show. Robust: a 0 / NaN active-layer count (odd keymap
   // RPC result) falls back to the config's own layer count instead of hiding
@@ -446,9 +462,9 @@ export function TrackpadSettingsV2({ caps }: { caps?: ToraboCaps | null }) {
                 value={dev}
                 onChange={(e) => setDev(Number(e.target.value))}
               >
-                {cfg.devices.map((d, i) => (
+                {visible.map((i) => (
                   <option key={i} value={i}>
-                    {describeDevice(d.deviceId, d.meta, t)}
+                    {describeDevice(cfg.devices[i].deviceId, cfg.devices[i].meta, t)}
                   </option>
                 ))}
               </select>

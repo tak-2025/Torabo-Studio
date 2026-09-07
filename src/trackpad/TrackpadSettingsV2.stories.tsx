@@ -135,6 +135,20 @@ const SAMPLE_CENTRAL_LEFT: TpConfig = {
   ],
 };
 
+/** A single-pad build on firmware that still reports device_count 2: the
+ * second slot's meta is 0 while the first one described itself, so the panel
+ * hides it. The dropdown must show ONE device, not a "デバイス 1" that edits
+ * nothing. The config still carries both slots — only the display drops one. */
+const SAMPLE_PHANTOM: TpConfig = {
+  layerCount: 4,
+  hasGestures: true,
+  hasCoast: true,
+  devices: [
+    device(0, devMeta(TpSide.Left, TpConn.Extension, TpKind.Trackpad)),
+    device(1, 0),
+  ],
+};
+
 /** Firmware older than the meta byte: everything unknown, labels degrade. It
  * also predates the coast block, so that section becomes the update note. */
 const SAMPLE_LEGACY: TpConfig = {
@@ -201,4 +215,10 @@ export const CentralOnLeft: Story = {
 /** Firmware predating the meta byte: labels fall back to "デバイス N" rather than lying. */
 export const LegacyFirmware: Story = {
   decorators: [withConfig(SAMPLE_LEGACY)],
+};
+
+/** Single pad, but the firmware still reports two devices. Press ① 読み込む: the
+ * dropdown offers only the pad — the undescribed slot is hidden, not labelled. */
+export const PhantomSecondDevice: Story = {
+  decorators: [withConfig(SAMPLE_PHANTOM)],
 };
