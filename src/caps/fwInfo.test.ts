@@ -287,7 +287,7 @@ describe("decodeFeatureCaps: Trackball/Encoder are back to pre-phase9 shape", ()
  * kind renumbered 2026-09-05): one caps u16, four 4-bit slots
  * (bits0-3/4-7/8-11/12-15 = left standard/left extension/right
  * standard/right extension), each independently 0=undeclared/1=ball/2=pad/
- * 3=4-way switch (reserved)/4=hi-res dial/9=encoder/15=none. Golden word
+ * 3=4-way switch/4=hi-res dial/9=encoder/15=none. Golden word
  * 0x2129 is the real descriptor observed on hardware: encoder/pad/ball/pad;
  * 0x2124 is the firmware-pinned variant of the same layout with a hi-res
  * dial on the left standard connector instead of the encoder.

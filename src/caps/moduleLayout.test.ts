@@ -711,11 +711,11 @@ describe("deriveModuleLayout: Feature.Modules declaration", () => {
   });
 
   /**
-   * FourWaySwitch (3): reserved on the firmware side — no builder emits it
-   * yet — but the decoder already knows the name, so a declaring build needs
-   * no app change. It occupies its cell exactly like Pad/Ball/Encoder: a
-   * solid, non-inferred badge, and it blocks the fallback inference the same
-   * way any other declared kind does.
+   * FourWaySwitch (3): sekigon's official kscan-4-direction-switch module,
+   * standard-connector-only, builder support landed 2026-09-19. It occupies
+   * its cell exactly like Pad/Ball/Encoder: a solid, non-inferred badge, and
+   * it blocks the fallback inference the same way any other declared kind
+   * does.
    */
   describe("FourWaySwitch (3): declared like any other kind, no trackpad-wire counterpart", () => {
     it("renders as its own badge, not inferred", () => {

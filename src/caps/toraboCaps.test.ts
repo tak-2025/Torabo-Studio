@@ -493,8 +493,8 @@ describe("module-layout declaration bits", () => {
   /**
    * moduleSlots() decodes Feature.Modules' caps u16: 4-bit nibbles, low to
    * high = left standard / left extension / right standard / right
-   * extension, each 0=undeclared, 1=ball, 2=pad, 3=4-way switch (reserved),
-   * 4=hi-res dial, 9=encoder, 15=none (ModuleKind, renumbered 2026-09-05).
+   * extension, each 0=undeclared, 1=ball, 2=pad, 3=4-way switch, 4=hi-res
+   * dial, 9=encoder, 15=none (ModuleKind, renumbered 2026-09-05).
    * The golden word below is the user's real hardware: an encoder on left
    * standard, a pad on left extension, a ball on right standard, a pad on
    * right extension.
